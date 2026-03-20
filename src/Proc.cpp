@@ -63,7 +63,9 @@ namespace ERCF
 				mitigation.absorptionFractions[idx],
 				cfg);
 
-			target->DamageActorValue(RE::ActorValue::kHealth, finalDamage);
+			if (auto* avOwner = target->AsActorValueOwner()) {
+				avOwner->ModActorValue(RE::ActorValue::kHealth, -finalDamage);
+			}
 		}
 	}
 }

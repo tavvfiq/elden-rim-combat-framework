@@ -15,7 +15,7 @@ namespace ERCF
 		{
 			constexpr const char* KW_MGEF_DEFENSE = "ERCF.MGEF.Defense";
 			constexpr const char* KW_MGEF_ABSORPTION = "ERCF.MGEF.Absorption";
-			constexpr const char* KW_MGEF_BUILdup = "ERCF.MGEF.Buildup";
+			constexpr const char* KW_MGEF_BUILDUP = "ERCF.MGEF.Buildup";
 			constexpr const char* KW_MGEF_RESBAND = "ERCF.MGEF.ResBand";
 
 			constexpr const char* KW_STATUS_POISON = "ERCF.Status.Poison";
@@ -70,13 +70,21 @@ namespace ERCF
 				const float absFrac = a_magnitudePercent / 100.0f;
 				return std::clamp(absFrac, 0.0f, 0.999f);
 			}
+
+			[[nodiscard]] RE::BSSimpleList<RE::ActiveEffect*>* GetActiveEffects(const RE::Actor* a_actor)
+			{
+				if (!a_actor) return nullptr;
+				auto* actor = const_cast<RE::Actor*>(a_actor);
+				auto* magicTarget = actor->AsMagicTarget();
+				return magicTarget ? magicTarget->GetActiveEffectList() : nullptr;
+			}
 		}
 
 		void ExtractMitigationFromActiveEffects(const RE::Actor* a_target, MitigationCoefficients& a_out)
 		{
 			if (!a_target) return;
 
-			auto* list = a_target->GetActiveEffectList();
+			auto* list = GetActiveEffects(a_target);
 			if (!list) return;
 
 			for (const auto* effect : *list) {
@@ -104,7 +112,7 @@ namespace ERCF
 		{
 			if (!a_target) return;
 
-			auto* list = a_target->GetActiveEffectList();
+			auto* list = GetActiveEffects(a_target);
 			if (!list) return;
 
 			for (const auto* effect : *list) {
@@ -129,7 +137,7 @@ namespace ERCF
 		{
 			if (!a_attacker) return;
 
-			auto* list = a_attacker->GetActiveEffectList();
+			auto* list = GetActiveEffects(a_attacker);
 			if (!list) return;
 
 			for (const auto* effect : *list) {
@@ -139,7 +147,7 @@ namespace ERCF
 				auto* setting = effect->GetBaseObject();
 				if (!setting) continue;
 
-				if (!HasEffectKW(setting, KW_MGEF_BUILdup)) continue;
+				if (!HasEffectKW(setting, KW_MGEF_BUILDUP)) continue;
 
 				const float magnitude = effect->GetMagnitude();
 

@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "Messaging.h"
 #include "Proc.h"
+#include "Config.h"
 #include "HitEventHandler.h"
 #include "PrismaUIMeters.h"
 
