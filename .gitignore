@@ -1,0 +1,36 @@
+# xmake
+build/
+.xmake/
+
+# Generated (optional: remove this line if you commit it for clangd/LSP)
+compile_commands.json
+
+# C++ / linker outputs (if built outside xmake output dir)
+*.dll
+*.exp
+*.ilk
+*.lib
+*.obj
+*.pdb
+*.iobj
+*.ipdb
+
+# Visual Studio / MSBuild
+.vs/
+*.user
+*.userosscache
+*.suo
+*.VC.db
+*.VC.VC.opendb
+
+# JetBrains / other IDEs
+.idea/
+cmake-build-*/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scratch / archives
+*.zip
+*.7z
