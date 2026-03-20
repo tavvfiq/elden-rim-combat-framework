@@ -1,0 +1,37 @@
+---
+description: Cursor agent uses RTK for applicable terminal commands when gathering context
+alwaysApply: true
+---
+
+# RTK ([rtk-ai/rtk](https://github.com/rtk-ai/rtk)) — agent scope
+
+RTK compresses noisy CLI output before it enters the LLM. **In this repo, RTK is for the AI agent** when it runs **terminal commands** to fetch context (build output, git, searches, tests). It is **not** a project requirement for maintainers’ local Windows/xmake workflows.
+
+## Rules (agent)
+
+1. **Prefix with `rtk`** when executing a shell command that has an RTK equivalent (see below). Do not double-wrap (`rtk rtk …`).
+2. **Exceptions — do not force RTK:**
+   - Commands already prefixed with `rtk`
+   - Heredocs, interactive TTY-only flows, or tools with no `rtk` mapping
+   - When **verbatim** raw output is explicitly required (use `rtk -v` / `--verbose` per RTK docs if appropriate)
+   - Editor tools (`Read`, `Grep`, etc.) — not shell
+3. **If `rtk` is missing** on the agent machine, run the underlying command once without `rtk` and note install: [RTK installation](https://github.com/rtk-ai/rtk#installation).
+
+## Common mappings (non-exhaustive)
+
+| Instead of | Prefer |
+|------------|--------|
+| `git status`, `git diff`, `git log`, … | `rtk git …` |
+| `gh pr`, `gh issue`, … | `rtk gh …` |
+| `cargo test`, `cargo build`, … | `rtk cargo …` |
+| `xmake` build / test (noisy logs) | `rtk xmake …` if supported; else `rtk` [proxy](https://github.com/rtk-ai/rtk/blob/master/README.md) / `rtk summary` for long commands |
+| `cmake` | `rtk cmake …` when CMake is used |
+| `pytest`, `vitest`, `go test`, … | `rtk pytest`, `rtk vitest run`, `rtk go test`, … |
+| `docker`, `kubectl` | `rtk docker …`, `rtk kubectl …` |
+| `ls`, file read, `grep`/`rg`, `find` | `rtk ls`, `rtk read`, `rtk grep`, `rtk find` |
+
+Full list: [RTK README — Commands](https://github.com/rtk-ai/rtk/blob/master/README.md).
+
+## xmake note
+
+If `rtk xmake` is not listed upstream, prefer **`rtk summary "<xmake command>"`** or run **`xmake`** with stderr/stdout that is still acceptable; when output is huge, trim with `rtk`’s documented wrappers where available.

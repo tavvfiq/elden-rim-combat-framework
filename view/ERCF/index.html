@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ERCF</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    .stack {
+      position: absolute;
+      left: 8px;
+      top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .statusRow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .statusIcon {
+      width: 50px;
+      height: 50px;
+      border-radius: 5px;
+      border: 2px solid rgba(70, 74, 58, 0.95);
+      background:
+        linear-gradient(140deg, rgba(255,255,255,0.15), rgba(255,255,255,0.03)),
+        rgba(17, 21, 15, 0.9);
+      box-shadow:
+        inset 0 0 0 1px rgba(0,0,0,0.55),
+        0 2px 6px rgba(0,0,0,0.5);
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .statusIcon::before {
+      content: "";
+      position: absolute;
+      inset: 7px;
+      border-radius: 3px;
+      filter: saturate(1.25);
+    }
+
+    #poisonIcon::before {
+      background: radial-gradient(circle at 35% 35%, #ffd54f 0%, #d6921a 42%, #8d5c10 100%);
+    }
+
+    #bleedIcon::before {
+      background: radial-gradient(circle at 35% 35%, #ff6d6d 0%, #c72f2f 42%, #6e1717 100%);
+    }
+
+    .barOuter {
+      position: relative;
+      width: 640px;
+      height: 18px;
+      border-radius: 4px;
+      border: 2px solid rgba(134, 130, 110, 0.95);
+      background: rgba(0,0,0,0.88);
+      overflow: hidden;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.5);
+    }
+
+    .barFill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: 0%;
+      transition: width 180ms ease;
+      border-radius: 2px;
+      opacity: 0.9;
+      overflow: hidden;
+    }
+
+    #poisonFill {
+      background: linear-gradient(90deg, #a36f0f 0%, #d9a11f 100%);
+    }
+
+    #bleedFill {
+      background: linear-gradient(90deg, #a81818 0%, #ea2f2f 100%);
+    }
+
+    .barOuter::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      border-radius: 2px;
+      border: 1px solid rgba(16,16,16,0.8);
+      pointer-events: none;
+    }
+
+    .tail {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 34%;
+      background: rgba(0,0,0,0.92);
+      border-left: 2px solid rgba(150,145,125,0.75);
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 1000px) {
+      .barOuter { width: 520px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stack">
+    <div class="statusRow">
+      <div class="statusIcon" id="poisonIcon" aria-label="Poison"></div>
+      <div class="barOuter">
+        <div class="barFill" id="poisonFill"></div>
+        <div class="tail"></div>
+      </div>
+    </div>
+    <div class="statusRow">
+      <div class="statusIcon" id="bleedIcon" aria-label="Bleed"></div>
+      <div class="barOuter">
+        <div class="barFill" id="bleedFill"></div>
+        <div class="tail"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const clamp01 = (x) => Math.max(0, Math.min(1, x));
+    const meterSet = (fillEl, value, maxValue = 100) => {
+      const v = Number(value);
+      const t = clamp01(v / maxValue);
+      fillEl.style.width = (t * 100).toFixed(1) + '%';
+      fillEl.style.opacity = (t > 0 ? 1 : 0.2);
+    };
+
+    // PrismaUI interop calls (functionName => string argument).
+    window.setPoisonMeter = (arg) => meterSet(document.getElementById('poisonFill'), arg);
+    window.setBleedMeter = (arg) => meterSet(document.getElementById('bleedFill'), arg);
+
+    // Initial values.
+    window.setPoisonMeter('0');
+    window.setBleedMeter('0');
+  </script>
+</body>
+</html>
+

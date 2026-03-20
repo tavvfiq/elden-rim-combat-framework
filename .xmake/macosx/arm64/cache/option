@@ -1,0 +1,59 @@
+{
+    skyrim_se = {
+        __sourceinfo_defines = {
+            ["ENABLE_SKYRIM_SE=1"] = {
+                file = "...roho/Documents/Projects/skyrim/CommonLibSSE-NG/xmake.lua",
+                line = 21
+            }
+        },
+        __scriptdir = "/Users/taufiq.nugroho/Documents/Projects/skyrim/CommonLibSSE-NG",
+        __sourceinfo_default = { },
+        description = "Enable runtime support for Skyrim SE",
+        default = true,
+        __sourceinfo_description = {
+            ["Enable runtime support for Skyrim SE"] = {
+                file = "...roho/Documents/Projects/skyrim/CommonLibSSE-NG/xmake.lua",
+                line = 20
+            }
+        },
+        defines = "ENABLE_SKYRIM_SE=1"
+    },
+    skyrim_ae = {
+        __sourceinfo_defines = {
+            ["ENABLE_SKYRIM_AE=1"] = {
+                file = "...roho/Documents/Projects/skyrim/CommonLibSSE-NG/xmake.lua",
+                line = 27
+            }
+        },
+        __scriptdir = "/Users/taufiq.nugroho/Documents/Projects/skyrim/CommonLibSSE-NG",
+        __sourceinfo_default = { },
+        description = "Enable runtime support for Skyrim AE",
+        default = true,
+        __sourceinfo_description = {
+            ["Enable runtime support for Skyrim AE"] = {
+                file = "...roho/Documents/Projects/skyrim/CommonLibSSE-NG/xmake.lua",
+                line = 26
+            }
+        },
+        defines = "ENABLE_SKYRIM_AE=1"
+    },
+    skyrim_vr = {
+        __sourceinfo_defines = {
+            ["ENABLE_SKYRIM_VR=1"] = {
+                file = "...roho/Documents/Projects/skyrim/CommonLibSSE-NG/xmake.lua",
+                line = 33
+            }
+        },
+        __scriptdir = "/Users/taufiq.nugroho/Documents/Projects/skyrim/CommonLibSSE-NG",
+        __sourceinfo_default = { },
+        description = "Enable runtime support for Skyrim VR",
+        default = true,
+        __sourceinfo_description = {
+            ["Enable runtime support for Skyrim VR"] = {
+                file = "...roho/Documents/Projects/skyrim/CommonLibSSE-NG/xmake.lua",
+                line = 32
+            }
+        },
+        defines = "ENABLE_SKYRIM_VR=1"
+    }
+}

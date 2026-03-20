@@ -1,0 +1,26 @@
+# ERCF Configuration
+#
+# This file is a reference. At runtime ERCF will load:
+# Data/SKSE/Plugins/<ERCF>/ercf.toml
+#
+# Any missing/invalid values fall back to the defaults below.
+
+# Defense curve constant used by:
+# PostDefense_T = ATK_T^2 / (ATK_T + k_defense * Defense_T)
+k_defense = 1.0
+
+# Resistance pacing constant used by:
+# EffectivePayload = Payload / (1 + k_resist * ResValue_band)
+k_resist = 1.0
+
+# Layer-2 damage is clamped to avoid "100% immunity forever".
+# DamageFloor_T = max(ATK_T * damage_floor_fraction, damage_floor_min)
+damage_floor_fraction = 0.001
+damage_floor_min = 0.0
+
+# Status meter decay:
+# - meter holds for status_decay_delay_seconds after last buildup
+# - then decays by meter *= exp(-status_decay_rate * dt)
+status_decay_delay_seconds = 0.75
+status_decay_rate = 4.0
+
