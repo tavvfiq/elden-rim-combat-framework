@@ -125,14 +125,22 @@ This checklist is designed to validate the current v1 vertical slice: hit interc
 
 ### A. Setup (ESP authoring)
 
-Ensure the test attacker/weapon/spell (or its active MGEF deliverer) provides at least:
+Ensure the test attacker provides at least:
 
-- Poison buildup payload active effect(s):
+- Poison buildup payload (weapon enchant MGEF):
+  - This repo currently sources status buildup from the attacker's **weapon enchantment effects** on hit.
   - MGEF keywords: `ERCF.MGEF.Buildup` + `ERCF.Status.Poison`
-  - magnitude = desired poison payload
-- Bleed buildup payload active effect(s):
+  - magnitude semantics:
+    - if `magnitude <= 1.0`, treated as a fraction (e.g. `0.25` = 25%)
+    - if `magnitude > 1.0`, treated as a percent (e.g. `25` = 25%)
+  - raw meter payload is computed as: `weaponPhysicalDamage * fraction`
+- Bleed buildup payload (weapon enchant MGEF):
+  - This repo currently sources status buildup from the attacker's **weapon enchantment effects** on hit.
   - MGEF keywords: `ERCF.MGEF.Buildup` + `ERCF.Status.Bleed`
-  - magnitude = desired bleed payload
+  - magnitude semantics:
+    - if `magnitude <= 1.0`, treated as a fraction (e.g. `0.25` = 25%)
+    - if `magnitude > 1.0`, treated as a percent (e.g. `25` = 25%)
+  - raw meter payload is computed as: `weaponPhysicalDamage * fraction`
 
 Ensure the test target (player) provides resistance and mitigation:
 
@@ -142,6 +150,9 @@ Ensure the test target (player) provides resistance and mitigation:
 - Robustness resistance band:
   - MGEF keywords: `ERCF.MGEF.ResBand` + `ERCF.ResBand.Robustness`
   - magnitude = `ResValue_band`
+- Runtime note:
+  - ERCF sums resistance from **active effects currently on the target actor** (not by directly reading equipment records).
+  - ERCF also caches summed resistances per actor for `status_resist_cache_ttl_seconds` (see `ercf.toml`), so if you toggle gear/passives in-game, resistance may take up to ~TTL seconds to change.
 - Magic mitigation (so Poison proc damage hits the pipeline):
   - MGEF keywords: `ERCF.MGEF.Defense` + `ERCF.DamageType.Elem.Magic` (+ optional absorption keywords `ERCF.MGEF.Absorption`)
 - Standard mitigation (so Bleed proc damage hits the pipeline):

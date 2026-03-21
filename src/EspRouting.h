@@ -5,6 +5,7 @@
 
 #include <RE/A/Actor.h>
 #include <RE/E/EffectSetting.h>
+namespace RE { class HitData; }
 
 namespace ERCF
 {
@@ -51,6 +52,16 @@ namespace ERCF
 		void ExtractMitigationFromActiveEffects(const RE::Actor* a_target, MitigationCoefficients& a_out);
 		void ExtractStatusResistancesFromActiveEffects(const RE::Actor* a_target, StatusResistanceCoefficients& a_out);
 		void ExtractStatusPayloadFromActiveEffects(const RE::Actor* a_attacker, StatusBuildupCoefficients& a_out);
+
+		// vNext approach: compute status buildup payload from the attack's weapon enchantment effects
+		// (so the enchant can be authored as "no real damage", but still drive meter buildup).
+		//
+		// Contract (for buildup MGEFs):
+		// - MGEF magnitude is interpreted as percent-of-weaponDamage (or fraction if <= 1.0).
+		// - We multiply the matched payload percent by a_hit->physicalDamage to get raw meter payload.
+		void ExtractStatusPayloadFromWeaponEnchant(
+			const RE::HitData* a_hit,
+			StatusBuildupCoefficients& a_out);
 	}
 }
 

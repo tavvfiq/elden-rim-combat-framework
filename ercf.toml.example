@@ -24,3 +24,22 @@ damage_floor_min = 0.0
 status_decay_delay_seconds = 0.75
 status_decay_rate = 4.0
 
+# Performance middle-ground:
+# Cache per-actor summed resistance values (Immunity/Robustness) for this many seconds.
+# This avoids scanning all ResBand active effects on every TESHitEvent.
+status_resist_cache_ttl_seconds = 0.2
+
+# Debugging (very spammy):
+# When enabled, ERCF writes one ERCF.log line per non-blocked TESHitEvent.
+debug_hit_log_enabled = false
+# If enabled, only log every Nth hit (N >= 1).
+debug_hit_log_every_n = 1
+
+# When true (default), hit logs are written only if the actor currently selected
+# in the Skyrim console matches the hit-event target actor.
+debug_hit_log_require_console_target_match = true
+
+# When true, emit logs even if the console-selected actor does not match.
+# Helps diagnose why you see no hit logs.
+debug_hit_log_log_selection_state = false
+

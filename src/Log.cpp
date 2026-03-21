@@ -47,6 +47,11 @@ namespace ERCFLog
 	{
 		if (auto logDir = SKSE::log::log_directory()) {
 			s_logPath = *logDir / "ERCF.log";
+			// Start each session with a fresh log file for easier debugging.
+			{
+				std::ofstream f{s_logPath, std::ios::out | std::ios::trunc};
+				(void)f;
+			}
 			Line("ERCF: log init");
 		}
 	}

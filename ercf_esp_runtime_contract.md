@@ -241,7 +241,10 @@ Use these as naming templates so it is obvious to both you and future contributo
 3) **Status buildup payload**
 - Name: `ERCF_MGEF_Buildup.<StatusId>.<S>`
 - Keywords on the MGEF: `ERCF.MGEF.Buildup` + `ERCF.Status...<S>`
-- Magnitude meaning: `Payload_S` per qualifying hit/tick
+- Magnitude meaning: converted into a meter payload fraction of the landed weapon damage.
+  - If `magnitude <= 1.0`: treated as a fraction (e.g. `0.25` = 25%)
+  - If `magnitude > 1.0`: treated as a percent (e.g. `25` = 25%)
+  - Raw meter payload = `weaponPhysicalDamage * fraction`
 
 4) **Status resistance (band value)**
 - Name: `ERCF_MGEF_ResBand.<Band>.<B>`
@@ -294,13 +297,31 @@ In both options:
 - Defense is Layer 1 input for the matching damage type `T`
 - Absorption is Layer 2 input for matching damage type `T`
 
+### 4.3.1 Status resistance contributions from ESP (target side)
+
+Resistance values are computed from **active effects currently present on the target actor**.
+
+Extraction rules:
+- For each active effect with base object tagged:
+  - `ERCF.MGEF.ResBand`
+  - plus one of:
+    - `ERCF.ResBand.Immunity` => contributes to `immunityResValue`
+    - `ERCF.ResBand.Robustness` => contributes to `robustnessResValue`
+- The active effect **magnitude** is added directly to the matching summed resistance value.
+
+Performance middle-ground (cache):
+- ERCF caches the summed resistances per actor for a short TTL to avoid re-scanning all `ResBand` effects on every hit.
+- TTL is controlled by `status_resist_cache_ttl_seconds` in `ercf.toml`.
+- Worst case: if you swap gear / toggle resist passives, the new resistance may take up to ~TTL seconds to be observed.
+
 ### 4.4 Status buildup contributions from ESP (attacker side)
 
-Status buildup is sourced from **status application MGEFs/spells** used by the attacker.
+Status buildup is sourced from **the attacker's weapon enchantment effects** evaluated on the hit.
 
 Contract:
-- A status-application MGEF is tagged with the `ERCF.Status.<StatusId>` keyword.
-- The MGEF **magnitude** is interpreted as the `Payload_S` for that status id.
+- The weapon enchantment's Magic Effect (MGEF) used by the enchant is tagged with:
+  - `ERCF.MGEF.Buildup` and `ERCF.Status.<StatusId>`
+- That MGEF **magnitude** is converted into a meter payload fraction of `weaponPhysicalDamage`.
 - When the hit lands and qualifies as “successful status delivery”, the plugin increments the meter.
 
 Where qualification comes from:
@@ -368,11 +389,14 @@ Other mods can subscribe and react (play custom VFX, spawn particles, apply extr
 To add one damage type + one status to v1, you should create:
 
 1. One `ERCF.DamageType...` keyword for the weapon/spell
-2. One attacker status MGEF tagged `ERCF.Status.<StatusId>` with correct payload magnitude
+2. One weapon enchant Magic Effect (MGEF) tagged `ERCF.MGEF.Buildup` + `ERCF.Status.<StatusId>` with correct magnitude fraction/percent
 3. One target mitigation MGEF/keyword that changes either:
    - `Defense_T`, or
    - `Absorption_T`
 4. (Optional) one resistance band MGEF that increases:
    - `ResBand.Immunity` / `ResBand.Robustness` / `ResBand.Focus` / `ResBand.Vitality`
+   
+   Note:
+   - In the current runtime, this must be an **active effect on the target actor** (commonly applied by equipment/perks/passives).
 5. Confirm the pop emits the expected `ERCF.StatusProc` event and the plugin applies the proc effect
 
