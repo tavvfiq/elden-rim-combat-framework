@@ -210,6 +210,7 @@ MGEF category routing (optional but recommended):
 - `ERCF.MGEF.Defense`
 - `ERCF.MGEF.Absorption`
 - `ERCF.MGEF.Buildup`
+- `ERCF.MGEF.ElementalDamage` (weapon/spell enchant: magnitude is treated as **elemental attack** on hit and runs through Defense→Absorption; **do not** pair with a vanilla DamageHealth effect unless you intend double application)
 - `ERCF.MGEF.ResBand`
 
 Status ids:
@@ -280,26 +281,48 @@ For an incoming hit, the plugin builds a list of **damage components**:
 
 ### 4.3 Defense / Absorption contributions from ESP (target side)
 
-Targets (actors) contribute `Defense_T` and `abs_i,T` using:
+**Current plugin behavior (v1+ hit pipeline):**
 
-**Option A (preferred): MGEFs on the actor**
-- Each mitigation MGEF is tagged with a keyword that routes it to `Defense_T` or `Absorption_T`.
-- The plugin uses MGEF **magnitude** as the value contribution.
+- **Physical (Standard / Strike / Slash / Pierce):** Layer-1 defense is derived from **worn armor pieces** only:
+  - Each `TESObjectARMO` contributes `GetArmorRating() * armor_rating_defense_scale` (see `ercf.toml`) split across the four physical types using `ERCF.DamageType.Phys.*` keywords on that armor (equal split if none).
+- **Elemental (Magic / Fire / Lightning / Holy):** Layer-1 defense and Layer-2 absorption are read only from **enchantments on worn items** (weapon enchants on equipped weapons do not apply to the target):
+  - Enchant MGEFs tagged `ERCF.MGEF.Defense` + `ERCF.DamageType.Elem.*` add elemental flat defense.
+  - Enchant MGEFs tagged `ERCF.MGEF.Absorption` + `ERCF.DamageType.Elem.*` add elemental absorption (magnitude ÷ 100, clamped).
 
-**Option B: keywords on equipped armor**
-- Keywords can route to a material bucket (e.g. “metal armor baseline absorption for Slash”).
-- Magnitudes come from armor material properties or authored trait tables.
+**Active effects (after worn armor):** `MergeMitigationFromActiveActorEffects` / `MergeStatusResistanceFromActiveActorEffects` add, on top of worn-armor results:
 
-In both options:
-- Defense is Layer 1 input for the matching damage type `T`
-- Absorption is Layer 2 input for matching damage type `T`
+- `ERCF.MGEF.Defense` + `ERCF.DamageType.*` (physical **or** elemental): magnitude adds to flat `Defense_T` for that type.
+- `ERCF.MGEF.Absorption` + type: magnitude ÷ 100 as an absorption layer for that type.
+- `ERCF.MGEF.ResBand` + band keyword: same as enchant rules for buildup pacing.
+
+Use this for **creature skin** (race spells, constant abilities on dragons, etc.) when they have no meaningful worn `ARMO`.
+
+> **Pipeline note:** Skyrim’s default weapon HP damage does not yet run through ERCF’s per-type indices. Extra ERCF elemental hit damage and status procs **do** use `defense` / `takenMult` for their mapped types (e.g. Bleed → Standard, Poison → Magic). **Slash-specific** defense on a dragon therefore applies once you route **slash-typed** attack damage through ERCF (future hook) or you approximate with `ERCF.MGEF.TakenMult` + Slash if that index is applied to the damage in question.
+
+### 4.3.1 Status resistance sourcing (target side)
+
+- **Immunity / Robustness** band values for buildup pacing are read from **enchantments on worn items** only (`ERCF.MGEF.ResBand` + band keyword + magnitude).
+
+### 4.3.2 Damage-type matchup (taken multiplier, after Defense→Absorption)
+
+ERCF applies an extra **per-damage-type multiplier** to HP damage **after** the Defense→Absorption pipeline:
+
+1. **Armor-weight blend (BOD2):** Each worn `TESObjectARMO` contributes `GetArmorRating()` to a **heavy**, **light**, or **clothing** bucket from `BGSBipedObjectForm::GetArmorType()`.  
+   For each damage type `T`, the base taken multiplier is a **rating-weighted average** of three configurable rows (`matchup_heavy_*`, `matchup_light_*`, `matchup_clothing_*` in `ercf.toml`).  
+   If total worn armor rating is **0** (naked), the **clothing** row is used for all types (“flesh / unarmored” baseline).
+
+2. **Per-actor overrides:** Active effects on the target with **`ERCF.MGEF.TakenMult`** + **`ERCF.DamageType...`** multiply that type further; **magnitude** is treated as a direct multiplier (e.g. `0.2` on Holy = takes 20% Holy damage after armor blend). Use for bosses, undead, stone/crystal races, etc.
+
+3. **Clamp:** Result is clamped to `[matchup_taken_mult_min, matchup_taken_mult_max]`.
+
+> **Content note:** Strike-vs-stone / Holy-vs-undead / Fire-vs-plants are best expressed with **`ERCF.MGEF.TakenMult`** (or similar) on races, abilities, or boss phases; the three armor rows only know **heavy / light / clothing**, not material species.
 
 ### 4.4 Status buildup contributions from ESP (attacker side)
 
-Status buildup is sourced from **status application MGEFs/spells** used by the attacker.
+Status buildup payloads are sourced from the **instance enchantment on the attacking weapon** (`GetAttackingWeapon()->GetEnchantment()` effect list) and/or **`HitData::attackDataSpell`** (when present), not from arbitrary active effects on the attacker.
 
 Contract:
-- A status-application MGEF is tagged with the `ERCF.Status.<StatusId>` keyword.
+- The MGEF is tagged with `ERCF.MGEF.Buildup` + `ERCF.Status.<StatusId>`.
 - The MGEF **magnitude** is interpreted as the `Payload_S` for that status id.
 - When the hit lands and qualifies as “successful status delivery”, the plugin increments the meter.
 

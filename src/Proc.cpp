@@ -2,6 +2,8 @@
 
 #include "Proc.h"
 
+#include <array>
+
 #include "Log.h"
 
 #include "CombatMath.h"
@@ -54,14 +56,20 @@ namespace ERCF
 
 			const auto cfg = Config::Get();
 			Esp::MitigationCoefficients mitigation{};
-			Esp::ExtractMitigationFromActiveEffects(target, mitigation);
+			Esp::StatusResistanceCoefficients resistUnused{};
+			Esp::ExtractFromWornArmor(target, cfg.armor_rating_defense_scale, mitigation, resistUnused);
+			Esp::MergeMitigationFromActiveActorEffects(target, mitigation);
+
+			std::array<float, Esp::kDamageTypeCount> takenMult{};
+			Esp::ExtractTakenDamageMultipliers(target, cfg, takenMult);
 
 			const std::size_t idx = static_cast<std::size_t>(dmgType);
-			const float finalDamage = Math::DamageAfterDefenseAndAbsorption(
+			float finalDamage = Math::DamageAfterDefenseAndAbsorption(
 				a_msg.payloadAtPop,
 				mitigation.defense[idx],
 				mitigation.absorptionFractions[idx],
 				cfg);
+			finalDamage = Math::ApplyTakenDamageMultiplier(finalDamage, takenMult[idx]);
 
 			target->DamageActorValue(RE::ActorValue::kHealth, finalDamage);
 		}

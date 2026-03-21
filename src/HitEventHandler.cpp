@@ -2,6 +2,7 @@
 
 #include "HitEventHandler.h"
 
+#include <array>
 #include <chrono>
 
 #include "CombatMath.h"
@@ -13,6 +14,7 @@
 
 #include "RE/S/ScriptEventSourceHolder.h"
 #include "RE/A/Actor.h"
+#include "RE/H/HitData.h"
 #include "RE/T/TESForm.h"
 
 namespace ERCF
@@ -106,24 +108,118 @@ namespace ERCF
 				return RE::BSEventNotifyControl::kContinue;
 			}
 
-			// Minimal HitData usage (plan alignment):
-			// only progress buildup if the hit actually dealt HP damage.
+			RE::HitData* hitData = nullptr;
 			if (auto* mh = target->GetMiddleHighProcess()) {
-				if (auto* hitData = mh->lastHitData; hitData && hitData->totalDamage <= 0.0f) {
-					return RE::BSEventNotifyControl::kContinue;
-				}
+				hitData = mh->lastHitData;
+			}
+
+			// Only react to hits that actually dealt HP damage (vanilla HitData snapshot).
+			if (hitData && hitData->totalDamage <= 0.0f) {
+				return RE::BSEventNotifyControl::kContinue;
 			}
 
 			const double nowSec = NowSeconds();
 			const auto cfg = ERCF::Config::Get();
 
-			// Extract v1 status payloads and resist values from active effects.
-			// Note: later we will refine payload sourcing to be per-spell/per-weapon rather than actor-wide.
-			Esp::StatusBuildupCoefficients payload{};
-			Esp::StatusResistanceCoefficients resist{};
+			const RE::InventoryEntryData* weaponEntry = attacker->GetAttackingWeapon();
+			RE::MagicItem* hitSpell = hitData ? hitData->attackDataSpell : nullptr;
 
-			Esp::ExtractStatusPayloadFromActiveEffects(attacker, payload);
-			Esp::ExtractStatusResistancesFromActiveEffects(target, resist);
+			Esp::StatusBuildupCoefficients payload{};
+			Esp::ElementalHitComponents elemental{};
+			Esp::ExtractHitSourceFromWeaponAndSpell(weaponEntry, hitSpell, payload, elemental);
+
+			bool anyElemental = false;
+			for (std::size_t i = static_cast<std::size_t>(Esp::DamageTypeId::Magic); i < Esp::kDamageTypeCount; ++i) {
+				if (elemental.attack[i] > 0.0f) {
+					anyElemental = true;
+					break;
+				}
+			}
+
+			if (payload.poisonPayload <= 0.0f && payload.bleedPayload <= 0.0f && !anyElemental) {
+				return RE::BSEventNotifyControl::kContinue;
+			}
+
+			Esp::MitigationCoefficients mitigation{};
+			Esp::StatusResistanceCoefficients resist{};
+			Esp::ExtractFromWornArmor(target, cfg.armor_rating_defense_scale, mitigation, resist);
+			Esp::MergeMitigationFromActiveActorEffects(target, mitigation);
+			Esp::MergeStatusResistanceFromActiveActorEffects(target, resist);
+
+			std::array<float, Esp::kDamageTypeCount> takenMult{};
+			Esp::ExtractTakenDamageMultipliers(target, cfg, takenMult);
+
+			if (cfg.debug_hit_events) {
+				const float td = hitData ? hitData->totalDamage : -1.0f;
+				const float pd = hitData ? hitData->physicalDamage : -1.0f;
+				const bool hasWench = weaponEntry && weaponEntry->GetEnchantment();
+				ERCFLog::LineF(
+					"ERCF [Hit] attacker=%08X target=%08X vanilla totalDmg=%.2f physDmg=%.2f wpnEnch=%d spell=%p "
+					"buildup poison=%.3f bleed=%.3f elem(Ma/Fi/Li/Ho)=%.2f,%.2f,%.2f,%.2f",
+					attacker->GetFormID(),
+					target->GetFormID(),
+					td,
+					pd,
+					hasWench ? 1 : 0,
+					static_cast<void*>(hitSpell),
+					payload.poisonPayload,
+					payload.bleedPayload,
+					elemental.attack[4],
+					elemental.attack[5],
+					elemental.attack[6],
+					elemental.attack[7]);
+				ERCFLog::LineF(
+					"ERCF [Hit] target resist immunity=%.3f robustness=%.3f "
+					"def(std/str/sla/pie)=%.2f,%.2f,%.2f,%.2f def(mag/fir/lig/hol)=%.2f,%.2f,%.2f,%.2f",
+					resist.immunityResValue,
+					resist.robustnessResValue,
+					mitigation.defense[0],
+					mitigation.defense[1],
+					mitigation.defense[2],
+					mitigation.defense[3],
+					mitigation.defense[4],
+					mitigation.defense[5],
+					mitigation.defense[6],
+					mitigation.defense[7]);
+				ERCFLog::LineF(
+					"ERCF [Hit] takenMult(std/str/sla/pie)=%.3f,%.3f,%.3f,%.3f takenMult(ma/fi/li/ho)=%.3f,%.3f,%.3f,%.3f",
+					takenMult[0],
+					takenMult[1],
+					takenMult[2],
+					takenMult[3],
+					takenMult[4],
+					takenMult[5],
+					takenMult[6],
+					takenMult[7]);
+			}
+
+			if (anyElemental) {
+				for (std::size_t i = static_cast<std::size_t>(Esp::DamageTypeId::Magic); i < Esp::kDamageTypeCount; ++i) {
+					const float atk = elemental.attack[i] * cfg.elemental_enchant_damage_scale;
+					if (atk <= 0.0f) {
+						continue;
+					}
+					const float postMit = Math::DamageAfterDefenseAndAbsorption(
+						atk,
+						mitigation.defense[i],
+						mitigation.absorptionFractions[i],
+						cfg);
+					const float dmg = Math::ApplyTakenDamageMultiplier(postMit, takenMult[i]);
+					if (cfg.debug_hit_events) {
+						ERCFLog::LineF(
+							"ERCF [Hit] elem typeIdx=%u atk=%.3f postMitig=%.3f absCount=%u takenMult=%.3f applyHP=%.3f",
+							static_cast<unsigned>(i),
+							atk,
+							postMit,
+							static_cast<unsigned>(mitigation.absorptionFractions[i].size()),
+							takenMult[i],
+							dmg);
+					}
+					if (dmg > 0.0f) {
+						target->DamageActorValue(RE::ActorValue::kHealth, dmg);
+					}
+				}
+			}
 
 			if (payload.poisonPayload <= 0.0f && payload.bleedPayload <= 0.0f) {
 				return RE::BSEventNotifyControl::kContinue;
@@ -156,6 +252,15 @@ namespace ERCF
 					state.poisonMeter = 0.0f;
 					state.poisonLastBuildupSec = nowSec;
 
+					if (cfg.debug_hit_events) {
+						ERCFLog::LineF(
+							"ERCF [Hit] StatusProc emit POISON attacker=%08X target=%08X meterBefore=%.3f payload=%.3f",
+							attacker->GetFormID(),
+							target->GetFormID(),
+							before,
+							payload.poisonPayload);
+					}
+
 					StatusProcMessage msg{};
 					msg.attackerFormId = attacker->GetFormID();
 					msg.targetFormId = target->GetFormID();
@@ -182,6 +287,15 @@ namespace ERCF
 					state.bleedMeter = 0.0f;
 					state.bleedLastBuildupSec = nowSec;
 
+					if (cfg.debug_hit_events) {
+						ERCFLog::LineF(
+							"ERCF [Hit] StatusProc emit BLEED attacker=%08X target=%08X meterBefore=%.3f payload=%.3f",
+							attacker->GetFormID(),
+							target->GetFormID(),
+							before,
+							payload.bleedPayload);
+					}
+
 					StatusProcMessage msg{};
 					msg.attackerFormId = attacker->GetFormID();
 					msg.targetFormId = target->GetFormID();
@@ -198,6 +312,12 @@ namespace ERCF
 
 			if (playerTarget) {
 				ERCFLog::LineF("ERCF: Player meters poison=%.2f bleed=%.2f", poisonAfter, bleedAfter);
+			} else if (cfg.debug_hit_events && (payload.poisonPayload > 0.0f || payload.bleedPayload > 0.0f)) {
+				ERCFLog::LineF(
+					"ERCF [Hit] NPC target meters poison=%.2f bleed=%.2f (target=%08X)",
+					poisonAfter,
+					bleedAfter,
+					target->GetFormID());
 			}
 
 			// Update UI outside the meter lock (interop can touch other subsystems).

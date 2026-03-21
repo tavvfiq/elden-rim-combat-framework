@@ -1,8 +1,7 @@
 ---
-description: Cursor agent uses RTK for applicable terminal commands when gathering context
-alwaysApply: true
+description: >-
+alwaysApply: false
 ---
-
 # RTK ([rtk-ai/rtk](https://github.com/rtk-ai/rtk)) — agent scope
 
 RTK compresses noisy CLI output before it enters the LLM. **In this repo, RTK is for the AI agent** when it runs **terminal commands** to fetch context (build output, git, searches, tests). It is **not** a project requirement for maintainers’ local Windows/xmake workflows.
@@ -20,7 +19,7 @@ RTK compresses noisy CLI output before it enters the LLM. **In this repo, RTK is
 ## Common mappings (non-exhaustive)
 
 | Instead of | Prefer |
-|------------|--------|
+|---|-----|
 | `git status`, `git diff`, `git log`, … | `rtk git …` |
 | `gh pr`, `gh issue`, … | `rtk gh …` |
 | `cargo test`, `cargo build`, … | `rtk cargo …` |

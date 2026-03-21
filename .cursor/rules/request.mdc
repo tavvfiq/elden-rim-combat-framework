@@ -1,0 +1,84 @@
+---
+description: >
+  Phased SKSE / Creation Engine implementation protocol for this repo: static recon (Phase 0),
+  hook and memory strategy (Phase 1), CommonLibSSE implementation (Phase 2), build and in-game
+  verification (Phase 3), post-deploy memory audit (Phase 4), and structured final report (Phase 5).
+  Use when the user asks for a new hook, native, memory patch, or end-to-end DLL change—not for
+  casual questions or docs-only edits unless they explicitly request this workflow.
+globs:
+  - src/**/*
+  - tests/**/*
+  - xmake.lua
+alwaysApply: false
+---
+{Define the target engine feature, custom Papyrus native function, or memory hook. Include target AddressLib IDs, expected register state, engine subsystem (e.g., Havok, Scaleform, AI), and the C++ objective.}
+
+---
+
+## **Mission Briefing: SKSE Plugin Implementation Protocol**
+
+You will execute this engine modification in full compliance with the **C++ / SKSE OPERATIONAL DOCTRINE**. Each phase is mandatory. No runtime guesswork.
+
+---
+
+## **Phase 0: Reconnaissance & Static Analysis (Read-Only)**
+
+-   **Directive:** Scan CommonLibSSE headers, IDA/Ghidra databases, and the existing `src/` tree. Map the target structs, virtual function tables (VTables), and calling conventions (`__fastcall`).
+-   **Output:** Produce a concise hex offset / AddressLib ID mapping and struct layout digest (≤ 50 lines).
+-   **Constraint:** **Static analysis only. No compiling or file mutation permitted.**
+
+---
+
+## **Phase 1: Hook & Data Strategy**
+
+-   **Directive:** Formulate a precise C++ trampoline, memory patch, or data binding plan.
+-   **Plan Requirements:**
+    1.  **Define Hook Type:** Specify `Branch`, `Call`, `Write5Branch`, `WriteVTable`, or standard Papyrus Native registration.
+    2.  **Identify Memory Impact:** Enumerate clobbered registers, required stack space, and affected engine subsystems (e.g., main thread vs. background task).
+    3.  **Justify Strategy:** Explain why this hook point is thread-safe and optimal for the Creation Engine tick cycle.
+-   **Constraint:** Abort and escalate if the target function is aggressively inlined across compiler versions (SE 1.5.97 vs AE 1.6.x) requiring signature scanning instead of static IDs.
+
+---
+
+## **Phase 2: Implementation & Injection**
+
+-   **Directive:** Write the C++ code using CommonLibSSE. Adhere to strict C++20 memory safety and engine paradigms.
+-   **Core Protocols in Effect:**
+    -   **Memory Allocator Canon:** Use `RE::MemoryManager` (`TES_HEAP_REDEFINE_NEW`) for objects passed to or owned by the engine. Never use standard Windows heap.
+    -   **Register Preservation:** `xbyak` assembly trampolines must explicitly `push`/`pop` all volatile registers (`RAX`, `RCX`, `RDX`, `R8-R11`, `XMM0-XMM3`).
+    -   **Papyrus Binding:** If exposing a function, write the `VirtualMachine` C++ registration and the accompanying `.psc` script simultaneously.
+
+---
+
+## **Phase 3: Compilation & Dynamic Verification**
+
+-   **Directive:** Build the `.dll` and empirically validate execution inside `SkyrimSE.exe`.
+-   **Verification Steps:**
+    1.  Execute build (`cmake --build` or MSBuild). Autonomously diagnose and resolve all `C` (Compiler) or `LNK` (Linker) errors.
+    2.  Deploy `.dll`, `.pdb`, and compiled `.pex` scripts to the Virtual File System (MO2/Vortex).
+    3.  Launch game, trigger the execution path, and confirm `skse64.log` initialization.
+
+---
+
+## **Phase 4: Zero-Trust Memory Audit**
+
+-   **Directive:** C++ compiles, but memory lies. Conduct a hostile audit of your own injection.
+-   **Audit Protocol:**
+    1.  **Verify Trampoline Layout:** If hooking, confirm the byte translation in the allocation space. Ensure no relative jumps (`REL32`) are calculating to wrong destinations.
+    2.  **Hunt Stack Imbalances:** Confirm `RSP` matches the pre-call state exactly after your code returns. Imbalances guarantee a delayed CTD.
+    3.  **Papyrus Sanity Check:** Verify `Papyrus.0.log` for native registration errors or missing script bindings.
+
+---
+
+## **Phase 5: Final Action Report & Verdict**
+
+-   **Directive:** Conclude with a strict data payload.
+-   **Report Structure:**
+    -   **Memory Altered:** AddressLib IDs, Offsets, Hook Types deployed.
+    -   **Code Added/Modified:** C++ files and Papyrus scripts injected.
+    -   **Verification Evidence:** - Build output `[PASS/FAIL]`
+        - `skse64.log` status `[PASS/FAIL]`
+    -   **Final Verdict:** Conclude with EXACTLY one of the following statements:
+        -   `[VERDICT] Memory stable. Hook deployed safely. Target logic executed without stack or register corruption. Mission accomplished.`
+        -   `[VERDICT] CRITICAL FAULT. Halting work. [Describe MSVC build failure, stack imbalance, or CTD and recommend immediate debugger steps].`
+-   **Constraint:** Maintain an inline tracking ledger using `[OK]` / `[WARN]` / `[WIP]` tags throughout the process. Do not use emojis.

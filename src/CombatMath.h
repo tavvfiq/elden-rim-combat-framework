@@ -51,6 +51,11 @@ namespace ERCF
 			return dmg;
 		}
 
+		[[nodiscard]] inline float ApplyTakenDamageMultiplier(float damage, float takenMult)
+		{
+			return damage * takenMult;
+		}
+
 		// v1: EffectivePayload = Payload / (1 + k_resist * ResValue_band)
 		[[nodiscard]] inline float EffectivePayload(float payload, float resValue, float k_resist)
 		{
