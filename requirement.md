@@ -5,7 +5,7 @@
 There are two top-level HP damage categories:
 
 - **Physical**: `Standard`, `Strike`, `Slash`, `Pierce`
-- **Elemental**: `Fire`, `Frost`, `Poison`, `Lightning`
+- **Elemental**: `Fire`, `Frost`, `Poison`, `Lightning`, `Magic` (generic)
 
 Design intent:
 
@@ -46,7 +46,7 @@ Layer 1 is global for player and NPC and is based on:
 #### Layer 1 defense buckets
 
 - Physical subtypes (`Standard/Strike/Slash/Pierce`) are consolidated into one **physical** defense bucket in Layer 1.
-- Elemental uses per-type defense (`Fire/Frost/Poison/Lightning`).
+- Elemental uses per-type defense (`Fire/Frost/Poison/Lightning/Magic`).
 
 #### Layer 1 formula
 
@@ -74,6 +74,15 @@ Important:
   - Pierce damage uses pierce mitigation bucket
   - Standard damage uses standard mitigation bucket
 - Race resistances apply in Layer 2 for relevant elemental type.
+- Contextual type modifiers in Layer 2:
+  - Silver material bonus applies to all physical subtypes when target is undead.
+    - Source keyword: `WeaponMaterialSilver` (vanilla)
+    - Target keyword: `ActorTypeUndead` (vanilla)
+  - Sun damage is treated as a separate split component using `Magic` type.
+    - Source tags: `DLC1SunDamage` (general) or `DLC1SunDamageUndead`
+    - Non-undead target: apply 100% reduction in layer 2 (`* 0`)
+    - Undead target: no special reduction (`* 1`)
+
 
 Total HP damage after both layers:
 
@@ -104,6 +113,7 @@ Final defense:
 - frost: `85 + 31 + 1.2 = 117.2`
 - poison: `85 + 31 + 1.2 = 117.2`
 - lightning: `85 + 31 + 1.2 = 117.2`
+- magical: `85 + 31 + 1.2 = 117.2`
 
 Layer-2 mitigation setup for example:
 

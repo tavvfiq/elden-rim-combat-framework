@@ -11,7 +11,7 @@ It is intentionally scoped to planning/spec only. Runtime code is not changed by
 - Physical damage types:
   - `Standard`, `Strike`, `Slash`, `Pierce`
 - Elemental damage types:
-  - `Fire`, `Frost`, `Poison`, `Lightning`
+  - `Fire`, `Frost`, `Poison`, `Lightning`, `Magic` (generic)
 - Layer 1 treats all physical subtypes as one physical bucket.
 - Layer 2 uses subtype-specific physical mitigation buckets (e.g. slash hit uses slash mitigation).
 - Race resistance applies in Layer 2 only, and only to relevant elemental type.
@@ -30,7 +30,7 @@ It is intentionally scoped to planning/spec only. Runtime code is not changed by
 
 - Incoming components (`rawDamage[type]`):
   - Physical subtype component(s): `Standard/Strike/Slash/Pierce`
-  - Elemental component(s): `Fire/Frost/Poison/Lightning`
+  - Elemental component(s): `Fire/Frost/Poison/Lightning/Magic`
 - Defender stats:
   - `level`
   - `health`, `magicka` (effective values per chosen source)
@@ -64,7 +64,7 @@ It is intentionally scoped to planning/spec only. Runtime code is not changed by
 
 - `DefensePhysicalL1 = BaseDefense + LevelIncrement + HealthTerm + ArmorTerm`
 - `DefenseElemL1(T) = BaseDefense + LevelIncrement + MagickaTerm`
-  - for `T in {Fire,Frost,Poison,Lightning}`
+  - for `T in {Fire,Frost,Poison,Lightning,Magic}`
 
 #### Layer 1 component result
 
@@ -96,7 +96,16 @@ Where:
   - Frost uses frost mitigation
   - Poison uses poison mitigation
   - Lightning uses lightning mitigation
+  - Magic uses magic mitigation
 - Race resistance is included here as one of `N_i(c)` for matching elemental types only.
+- Contextual modifiers (also in Layer 2):
+  - Silver physical bonus:
+    - applies to all physical subtypes when source has `WeaponMaterialSilver` and target has `ActorTypeUndead`
+  - Sun damage:
+    - treated as separate split component of `Magic` type
+    - source tags: `DLC1SunDamage` or `DLC1SunDamageUndead`
+    - non-undead target: multiply by `0.0`
+    - undead target: multiply by `1.0`
 
 #### Final HP damage
 
@@ -213,8 +222,12 @@ Where:
   - physical subtype tag(s) and elemental type tag(s)
 - Layer 2 mitigation values per bucket:
   - standard/strike/slash/pierce
-  - fire/frost/poison/lightning
+  - fire/frost/poison/lightning/magic
 - Race elemental resistance entries (mapped into layer-2 elemental mitigation)
+- Contextual keyword checks:
+  - source: `WeaponMaterialSilver`
+  - target: `ActorTypeUndead`
+  - source: `DLC1SunDamage` and `DLC1SunDamageUndead`
 - Boss keyword assignment:
   - `ERCF.Actor.Boss` (placeholder)
 
