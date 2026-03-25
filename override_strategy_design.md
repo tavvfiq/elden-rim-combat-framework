@@ -68,7 +68,7 @@ If exact pre-commit suppression is unavailable on a runtime version:
 
 ## 4.3 Re-entrancy Guard
 
-When ERCF calls `DamageActorValue`, it must not trigger its own override path recursively.
+When ERCF applies HP damage (`ActorValueOwner::ModActorValue` with a negative delta), it must not trigger its own override path recursively.
 
 Implement:
 

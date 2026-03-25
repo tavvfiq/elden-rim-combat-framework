@@ -142,6 +142,9 @@ Race resistance:
 ## 3.4 Final HP Application
 
 - Sum finalized components and apply once per hit to target HP.
+- CommonLibSSE-NG application API:
+  - use `target->AsActorValueOwner()->ModActorValue(RE::ActorValue::kHealth, -finalHPDamage)`
+  - convention: damage is a negative delta
 - Keep per-component debug logs to verify routing and bucket use.
 
 ## 4) Status System Implementation
