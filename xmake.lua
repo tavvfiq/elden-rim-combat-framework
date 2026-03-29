@@ -2,7 +2,7 @@
 set_xmakever("2.8.2")
 
 -- Make sure xmake can find the local CommonLibSSE-NG xmake scripts (plugin rule).
-includes("/Users/taufiq.nugroho/Documents/Projects/skyrim/CommonLibSSE-NG")
+includes("D:/Modding/CommonLibSSE-NG")
 
 -- set project
 set_project("ERCF")
@@ -23,6 +23,7 @@ set_defaultmode("releasedbg")
 -- targets
 target("ercf")
     add_deps("commonlibsse-ng")
+    add_packages("toml11")
     add_rules("commonlibsse-ng.plugin", {
         name = "ERCF",
         author = "taufiq.nugroho",

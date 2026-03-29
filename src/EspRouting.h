@@ -43,12 +43,18 @@ namespace ERCF
 		{
 			float immunityResValue = 0.0f;
 			float robustnessResValue = 0.0f;
+			float focusResValue = 0.0f;
+			float madnessResValue = 0.0f;
 		};
 
 		struct StatusBuildupCoefficients
 		{
 			float poisonPayload = 0.0f;
 			float bleedPayload = 0.0f;
+			float rotPayload = 0.0f;
+			float frostbitePayload = 0.0f;
+			float sleepPayload = 0.0f;
+			float madnessPayload = 0.0f;
 		};
 
 		// Per-hit elemental attack values from weapon/spell magic items (enchantment / spell effects).
@@ -62,14 +68,46 @@ namespace ERCF
 
 		// --- Hit source (weapon enchant + optional spell from HitData) ---
 
+		// Filled by HitEventHandler + ExtractHitSourceFromWeaponAndSpell when tracing (debug_hit_events).
+		struct HitMagicTrace
+		{
+			enum class WeaponEntry : std::uint8_t
+			{
+				None = 0,
+				AttackingWeapon,
+				EquippedSlotMatch
+			};
+			enum class WeaponEnchant : std::uint8_t
+			{
+				None = 0,
+				InstanceOnEntry,
+				BoundWeaponEITM,
+				HitDataWeaponFormEITM
+			};
+			WeaponEntry weaponEntryKind{ WeaponEntry::None };
+			WeaponEnchant weaponEnchantKind{ WeaponEnchant::None };
+			bool accumulatedSeparateHitSpell{ false };
+		};
+
 		// Reads ERCF-tagged effects from the weapon's instance enchantment and/or the hit spell.
 		// Buildup: MGEF keywords ERCF.MGEF.Buildup + ERCF.Status.* (magnitude does not deal HP by itself here).
 		// Elemental: MGEF keywords ERCF.MGEF.ElementalDamage + ERCF.DamageType.Elem.* (magnitude is processed as attack in HitEventHandler).
 		void ExtractHitSourceFromWeaponAndSpell(const RE::InventoryEntryData* a_weaponEntry, const RE::MagicItem* a_hitSpell,
-			StatusBuildupCoefficients& a_buildupOut, ElementalHitComponents& a_elementalOut);
+			StatusBuildupCoefficients& a_buildupOut, ElementalHitComponents& a_elementalOut,
+			const RE::TESObjectWEAP* a_weaponFormFallback = nullptr, HitMagicTrace* a_trace = nullptr);
 
 		// Weapon physical profile: ERCF.DamageType.Phys.* keywords on the weapon if present, else WEAPON_TYPE fallback.
 		void ResolvePhysicalWeaponWeights(const RE::TESObjectWEAP* a_weapon, PhysicalWeaponWeights& a_weightsOut);
+
+		// Requirement-v2 bridge (incremental): pick a dominant physical subtype for a hit and return the
+		// defender's layer-2 mitigation percents for that subtype.
+		//
+		// Uses existing `absorptionFractions[subtype]` as mitigation percents (each element is an absorbed fraction in [0,1]).
+		[[nodiscard]] DamageTypeId ResolveDominantPhysicalSubtype(const RE::TESObjectWEAP* a_weapon);
+		[[nodiscard]] std::vector<float> ExtractLayer2MitigationPercentsForPhysicalSubtype(
+			RE::Actor* a_target,
+			DamageTypeId a_physicalSubtype,
+			const Config::Values& a_cfg);
 
 		// --- Target (worn armor) ---
 

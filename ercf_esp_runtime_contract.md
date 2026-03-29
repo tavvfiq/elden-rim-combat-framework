@@ -166,7 +166,7 @@ If `now - LastBuildupTime_S < DecayDelay`:
 - `Meter_S` unchanged
 
 Else:
-- `Meter_S = Meter_S * exp(-DecayRate * dt)`
+- `Meter_S = max(0, Meter_S - DecayRate * dt)` (linear; `DecayRate` is buildup points per second)
 
 ### 3.4 Proc application and event emission
 

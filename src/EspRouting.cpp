@@ -23,9 +23,15 @@ namespace ERCF
 
 			constexpr const char* KW_STATUS_POISON = "ERCF.Status.Poison";
 			constexpr const char* KW_STATUS_BLEED = "ERCF.Status.Bleed";
+			constexpr const char* KW_STATUS_ROT = "ERCF.Status.Rot";
+			constexpr const char* KW_STATUS_FROSTBITE = "ERCF.Status.Frostbite";
+			constexpr const char* KW_STATUS_SLEEP = "ERCF.Status.Sleep";
+			constexpr const char* KW_STATUS_MADNESS = "ERCF.Status.Madness";
 
 			constexpr const char* KW_BAND_IMMUNITY = "ERCF.ResBand.Immunity";
 			constexpr const char* KW_BAND_ROBUSTNESS = "ERCF.ResBand.Robustness";
+			constexpr const char* KW_BAND_FOCUS = "ERCF.ResBand.Focus";
+			constexpr const char* KW_BAND_MADNESS = "ERCF.ResBand.Madness";
 
 			constexpr const char* KW_DAMAGE_STD = "ERCF.DamageType.Phys.Standard";
 			constexpr const char* KW_DAMAGE_STRIKE = "ERCF.DamageType.Phys.Strike";
@@ -83,6 +89,15 @@ namespace ERCF
 					return false;
 				}
 				return a_effect->conditionStatus.get() == RE::ActiveEffect::ConditionStatus::kTrue;
+			}
+
+			// AE: GetActiveEffectList is not declared on RE::Actor (see Actor.h); use MagicTarget vtable.
+			[[nodiscard]] RE::BSSimpleList<RE::ActiveEffect*>* GetActorActiveEffectList(const RE::Actor* a_actor)
+			{
+				if (!a_actor) {
+					return nullptr;
+				}
+				return const_cast<RE::Actor*>(a_actor)->AsMagicTarget()->GetActiveEffectList();
 			}
 
 			void NormalizePhysFour(PhysicalWeaponWeights& w)
@@ -147,6 +162,18 @@ namespace ERCF
 						if (HasEffectKW(setting, KW_STATUS_BLEED)) {
 							a_buildup.bleedPayload += mag;
 						}
+						if (HasEffectKW(setting, KW_STATUS_ROT)) {
+							a_buildup.rotPayload += mag;
+						}
+						if (HasEffectKW(setting, KW_STATUS_FROSTBITE)) {
+							a_buildup.frostbitePayload += mag;
+						}
+						if (HasEffectKW(setting, KW_STATUS_SLEEP)) {
+							a_buildup.sleepPayload += mag;
+						}
+						if (HasEffectKW(setting, KW_STATUS_MADNESS)) {
+							a_buildup.madnessPayload += mag;
+						}
 					}
 
 					if (HasEffectKW(setting, KW_MGEF_ELEMENTAL_DAMAGE)) {
@@ -180,7 +207,7 @@ namespace ERCF
 					}
 
 					const float mag = eff->GetMagnitude();
-					const auto idx = static_cast<std::size_t>(*dt.value());
+					const auto idx = static_cast<std::size_t>(*dt);
 
 					if (HasEffectKW(setting, KW_MGEF_DEFENSE)) {
 						a_out.defense[idx] += mag;
@@ -213,6 +240,10 @@ namespace ERCF
 						a_out.immunityResValue += mag;
 					} else if (HasEffectKW(setting, KW_BAND_ROBUSTNESS)) {
 						a_out.robustnessResValue += mag;
+					} else if (HasEffectKW(setting, KW_BAND_FOCUS)) {
+						a_out.focusResValue += mag;
+					} else if (HasEffectKW(setting, KW_BAND_MADNESS)) {
+						a_out.madnessResValue += mag;
 					}
 				}
 			}
@@ -341,12 +372,12 @@ namespace ERCF
 				if (!a_target) {
 					return;
 				}
-				auto* list = a_target->GetActiveEffectList();
+				auto* list = GetActorActiveEffectList(a_target);
 				if (!list) {
 					return;
 				}
 
-				for (const auto* effect : *list) {
+				for (auto* effect : *list) {
 					if (!effect || !HasActiveTrueCondition(effect)) {
 						continue;
 					}
@@ -372,12 +403,12 @@ namespace ERCF
 				if (!a_target) {
 					return;
 				}
-				auto* list = a_target->GetActiveEffectList();
+				auto* list = GetActorActiveEffectList(a_target);
 				if (!list) {
 					return;
 				}
 
-				for (const auto* effect : *list) {
+				for (auto* effect : *list) {
 					if (!effect || !HasActiveTrueCondition(effect)) {
 						continue;
 					}
@@ -405,12 +436,12 @@ namespace ERCF
 				if (!a_target) {
 					return;
 				}
-				auto* list = a_target->GetActiveEffectList();
+				auto* list = GetActorActiveEffectList(a_target);
 				if (!list) {
 					return;
 				}
 
-				for (const auto* effect : *list) {
+				for (auto* effect : *list) {
 					if (!effect || !HasActiveTrueCondition(effect)) {
 						continue;
 					}
@@ -423,23 +454,56 @@ namespace ERCF
 						a_io.immunityResValue += mag;
 					} else if (HasEffectKW(setting, KW_BAND_ROBUSTNESS)) {
 						a_io.robustnessResValue += mag;
+					} else if (HasEffectKW(setting, KW_BAND_FOCUS)) {
+						a_io.focusResValue += mag;
+					} else if (HasEffectKW(setting, KW_BAND_MADNESS)) {
+						a_io.madnessResValue += mag;
 					}
 				}
 			}
 		}
 
 		void ExtractHitSourceFromWeaponAndSpell(const RE::InventoryEntryData* a_weaponEntry, const RE::MagicItem* a_hitSpell,
-			StatusBuildupCoefficients& a_buildupOut, ElementalHitComponents& a_elementalOut)
+			StatusBuildupCoefficients& a_buildupOut, ElementalHitComponents& a_elementalOut,
+			const RE::TESObjectWEAP* a_weaponFormFallback, HitMagicTrace* a_trace)
 		{
 			const RE::MagicItem* weaponMagic = nullptr;
+
 			if (a_weaponEntry) {
 				weaponMagic = a_weaponEntry->GetEnchantment();
 				if (weaponMagic) {
+					if (a_trace) {
+						a_trace->weaponEnchantKind = HitMagicTrace::WeaponEnchant::InstanceOnEntry;
+					}
 					AccumulateMagicItemForHit(weaponMagic, a_buildupOut, a_elementalOut);
+				} else {
+					if (const auto* bound = a_weaponEntry->GetObject()) {
+						if (const auto* weap = bound->As<RE::TESObjectWEAP>()) {
+							if (weap->formEnchanting) {
+								weaponMagic = weap->formEnchanting;
+								if (a_trace) {
+									a_trace->weaponEnchantKind = HitMagicTrace::WeaponEnchant::BoundWeaponEITM;
+								}
+								AccumulateMagicItemForHit(weaponMagic, a_buildupOut, a_elementalOut);
+							}
+						}
+					}
 				}
 			}
 
+			// NPCs often lack GetAttackingWeapon(); HitData::weapon + base EITM still carries ERCF buildup.
+			if (!weaponMagic && a_weaponFormFallback && a_weaponFormFallback->formEnchanting) {
+				weaponMagic = a_weaponFormFallback->formEnchanting;
+				if (a_trace) {
+					a_trace->weaponEnchantKind = HitMagicTrace::WeaponEnchant::HitDataWeaponFormEITM;
+				}
+				AccumulateMagicItemForHit(weaponMagic, a_buildupOut, a_elementalOut);
+			}
+
 			if (a_hitSpell && a_hitSpell != weaponMagic) {
+				if (a_trace) {
+					a_trace->accumulatedSeparateHitSpell = true;
+				}
 				AccumulateMagicItemForHit(a_hitSpell, a_buildupOut, a_elementalOut);
 			}
 		}
@@ -461,7 +525,7 @@ namespace ERCF
 				return;
 			}
 
-			using WT = RE::TESObjectWEAP::WEAPON_TYPE;
+			using WT = RE::WEAPON_TYPE;
 			const auto t = a_weapon->GetWeaponType();
 
 			switch (t) {
@@ -497,6 +561,43 @@ namespace ERCF
 				break;
 			}
 			NormalizePhysFour(a_weightsOut);
+		}
+
+		DamageTypeId ResolveDominantPhysicalSubtype(const RE::TESObjectWEAP* a_weapon)
+		{
+			PhysicalWeaponWeights w{};
+			ResolvePhysicalWeaponWeights(a_weapon, w);
+
+			std::size_t best = 0;
+			float bestW = w[0];
+			for (std::size_t i = 1; i < 4; ++i) {
+				if (w[i] > bestW) {
+					bestW = w[i];
+					best = i;
+				}
+			}
+			return static_cast<DamageTypeId>(best);  // 0..3 map to Standard..Pierce
+		}
+
+		std::vector<float> ExtractLayer2MitigationPercentsForPhysicalSubtype(
+			RE::Actor* a_target,
+			DamageTypeId a_physicalSubtype,
+			const Config::Values& a_cfg)
+		{
+			std::vector<float> out{};
+			if (!a_target) {
+				return out;
+			}
+			const auto idx = static_cast<std::size_t>(a_physicalSubtype);
+			if (idx >= 4) {
+				return out;
+			}
+
+			MitigationCoefficients mit{};
+			StatusResistanceCoefficients res{};
+			ExtractFromWornArmor(a_target, a_cfg.armor_rating_defense_scale, mit, res);
+			MergeMitigationFromActiveActorEffects(a_target, mit);
+			return mit.absorptionFractions[idx];
 		}
 
 		void ExtractFromWornArmor(RE::Actor* a_target, float a_armorRatingDefenseScale, MitigationCoefficients& a_mitigationOut,
@@ -539,8 +640,11 @@ namespace ERCF
 			BlendMatchupFromArmorWeights(w, a_cfg, a_out);
 			ApplyActiveTakenMultEffects(a_target, a_out);
 
+			// Taken mult is a non-negative damage multiplier; negative values would invert
+			// ModActorValue(kHealth, -dmg) into healing. Clamp config typo / bad MGEF data.
+			const float low = std::max(0.0f, a_cfg.matchup_taken_mult_min);
 			for (float& x : a_out) {
-				x = std::clamp(x, a_cfg.matchup_taken_mult_min, a_cfg.matchup_taken_mult_max);
+				x = std::clamp(x, low, a_cfg.matchup_taken_mult_max);
 			}
 		}
 
