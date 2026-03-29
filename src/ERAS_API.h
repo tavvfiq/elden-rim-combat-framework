@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <Windows.h>
 
-// Optional dependency: Elden Rim Leveling System (ERLS).
-// This header is vendored from the ERLS project to consume its runtime C++ plugin API via GetModuleHandle/GetProcAddress.
-namespace ERLS_API
+// Optional dependency: Elden Rim Leveling System (ERAS).
+// This header is vendored from the ERAS project to consume its runtime C++ plugin API via GetModuleHandle/GetProcAddress.
+namespace ERAS_API
 {
 	enum class InterfaceVersion : std::uint8_t
 	{
@@ -72,19 +72,22 @@ namespace ERLS_API
 	using GetPlayerStatsFn = bool (*)(PlayerStatsSnapshot* outSnapshot);
 	using GetERLevelFn = std::int32_t (*)();
 	using GetAttributesFn = bool (*)(AttributeSet* outAttrs);
+	// actorPtr is a live `RE::Actor*` from the game; null is invalid.
+	using GetStatsSnapshotForActorFn = bool (*)(void* actorPtr, PlayerStatsSnapshot* outSnapshot);
 
-	struct IERLS1
+	struct IERAS1
 	{
 		GetPlayerStatsFn getPlayerStats;
 		GetERLevelFn getERLevel;
 		GetAttributesFn getAttributes;
+		GetStatsSnapshotForActorFn getStatsSnapshotForActor;
 	};
 
 	using RequestPluginAPIFn = void* (*)(InterfaceVersion interfaceVersion);
 
-	constexpr auto kPluginDLL = L"eldenrimlevelingsystem.dll";
+	constexpr auto kPluginDLL = L"eras.dll";
 
-	[[nodiscard]] inline IERLS1* RequestPluginAPI(const InterfaceVersion interfaceVersion = InterfaceVersion::V1)
+	[[nodiscard]] inline IERAS1* RequestPluginAPI(const InterfaceVersion interfaceVersion = InterfaceVersion::V1)
 	{
 		const auto pluginHandle = GetModuleHandleW(kPluginDLL);
 		if (!pluginHandle) {
@@ -97,7 +100,7 @@ namespace ERLS_API
 			return nullptr;
 		}
 
-		return static_cast<IERLS1*>(requestAPIFunction(interfaceVersion));
+		return static_cast<IERAS1*>(requestAPIFunction(interfaceVersion));
 	}
 }
 

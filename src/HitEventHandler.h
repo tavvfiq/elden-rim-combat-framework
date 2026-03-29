@@ -8,7 +8,7 @@ namespace ERCF
 {
 	namespace Runtime
 	{
-		// Evaluated ERCF status meters for the player (decay on Actor::Update). For Prisma HUD polling between hits.
+		// Evaluated ERCF status meters for the player (decay on Actor::Update). Used when pushing Prisma HUD from gameplay.
 		[[nodiscard]] bool TryGetPlayerMetersHudSnapshot(StatusEffects::PlayerMetersHudSnapshot& a_out);
 
 		[[nodiscard]] bool TryGetPlayerMeterSnapshotForHud(float& poisonOut, float& bleedOut);

@@ -86,12 +86,6 @@ namespace ERCF
 					toml::find_or<bool>(tbl, "debug_status_decay", s_values.debug_status_decay);
 				s_values.enable_prisma_hud =
 					toml::find_or<bool>(tbl, "enable_prisma_hud", s_values.enable_prisma_hud);
-				s_values.prisma_hud_poll_interval_seconds = std::max(
-					0.05f,
-					toml::find_or<float>(
-						tbl,
-						"prisma_hud_poll_interval_seconds",
-						s_values.prisma_hud_poll_interval_seconds));
 
 				ERCFLog::Line("ERCF: loaded ercf.toml successfully");
 			} catch (...) {
@@ -127,11 +121,6 @@ namespace ERCF
 			ERCFLog::LineF("Config: effective override_mode_strict=%s", s_values.override_mode_strict ? "true" : "false");
 			ERCFLog::LineF("Config: effective override_debug_log=%s", s_values.override_debug_log ? "true" : "false");
 			ERCFLog::LineF("Config: effective enable_prisma_hud=%s", s_values.enable_prisma_hud ? "true" : "false");
-			if (s_values.enable_prisma_hud) {
-				ERCFLog::LineF(
-					"Config: prisma poll_interval_seconds=%.2f",
-					s_values.prisma_hud_poll_interval_seconds);
-			}
 		}
 
 		std::optional<std::filesystem::path> GetPluginDirectory()

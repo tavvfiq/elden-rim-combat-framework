@@ -64,6 +64,8 @@ namespace ERCF
 		float targetMaxMagicka = 0.0f;
 		float targetMaxStamina = 0.0f;
 		std::uint32_t procContextFlags = 0;
+		// Poison/rot: immunity threshold at pop (meter drain per 1s tick = this / 90). Frostbite: robustness at pop (meter drain per 1s tick = this / 30).
+		float meterDecayReferenceThreshold = 0.0f;
 	};
 
 	// Compile-time check: keep it POD/ABI-stable across compilers.

@@ -4,7 +4,7 @@
 
 #include "CombatMath.h"
 #include "Config.h"
-#include "ERLSIntegration.h"
+#include "ERASIntegration.h"
 #include "EspRouting.h"
 #include "Log.h"
 #include "Proc.h"
@@ -20,7 +20,18 @@ namespace ERCF::Override
 		// Re-entrancy guard: ERCF applies HP once and must not recurse through the hook.
 		thread_local bool s_inERCFApply = false;
 
-		[[nodiscard]] float ComputeRequirementDamageForPlayerVictim(
+		[[nodiscard]] bool VictimEligibleForDamageOverride(RE::Actor* a_victim)
+		{
+			if (!a_victim) {
+				return false;
+			}
+			if (a_victim->IsPlayerRef()) {
+				return true;
+			}
+			return a_victim->HasKeywordString("ActorTypeNPC");
+		}
+
+		[[nodiscard]] float ComputeRequirementDamageForVictim(
 			RE::Actor* a_victim,
 			const RE::HitData& a_hitData,
 			float a_rawVanillaDamage)
@@ -35,13 +46,13 @@ namespace ERCF::Override
 			float maxHP = 0.0f;
 			float maxMP = 0.0f;
 
-			ERLS_API::PlayerStatsSnapshot snap{};
-			if (ERCF::ERLS::TryGetPlayerSnapshot(snap)) {
+			ERAS_API::PlayerStatsSnapshot snap{};
+			if (ERCF::ERAS::TryGetActorSnapshot(a_victim, snap)) {
 				level = static_cast<float>(snap.erLevel);
 				maxHP = static_cast<float>(snap.derived.maxHP);
 				maxMP = static_cast<float>(snap.derived.maxMP);
 			} else if (auto* av = a_victim->AsActorValueOwner()) {
-				// Fallback when ERLS is unavailable.
+				// Fallback when ERAS is unavailable.
 				maxHP = av->GetActorValue(RE::ActorValue::kHealth);
 				maxMP = av->GetActorValue(RE::ActorValue::kMagicka);
 			}
@@ -130,19 +141,16 @@ namespace ERCF::Override
 				if (!aggressor || a_victim->IsDead()) {
 					return _ProcessHit(a_victim, a_hitData);
 				}
-				// Phase 0 scope: player-only override for safety.
-				if (!a_victim->IsPlayerRef()) {
+				if (!VictimEligibleForDamageOverride(a_victim)) {
 					return _ProcessHit(a_victim, a_hitData);
 				}
 
-				// Phase 0 proof:
-				// - suppress vanilla HP damage for this hit
-				// - apply exactly one ERCF HP delta afterwards
+				// Suppress vanilla HP for this hit, then apply a single ERCF HP delta.
 				const float vanilla = a_hitData.totalDamage;
 				a_hitData.totalDamage = 0.0f;
 				_ProcessHit(a_victim, a_hitData);
 
-				const float ercfDamage = ComputeRequirementDamageForPlayerVictim(a_victim, a_hitData, vanilla);
+				const float ercfDamage = ComputeRequirementDamageForVictim(a_victim, a_hitData, vanilla);
 				if (ercfDamage <= 0.0f) {
 					return;
 				}

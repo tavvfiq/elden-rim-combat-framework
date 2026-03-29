@@ -61,7 +61,7 @@ Stack: **ESP** (authoritative data) + **SKSE C++ plugin** (runtime pipeline, eve
 
 **Principle:** HUD reflects plugin state over the native API; **no** Papyrus bridge required for UI.
 
-**Runtime:** `enable_prisma_hud` defaults to **false** in `ercf.toml` (WebView2 can freeze on some setups). When enabled, `CreateView` runs on `kDataLoaded` after `RequestPluginAPI` (same timing idea as Souls Style Looting). **Buildup** updates use hit-deferred `OnPlayerBuildupHudEvent` plus `EmitPrismaHudBuildupRefresh()` → `OnPrismaHudBuildupMessaging` → `try_update`. **Decay** on the bar is sampled on a background poll at `prisma_hud_poll_interval_seconds` (menus/title stop the poll and hide the overlay). Interop throttling and first-Show grace are fixed constants in `PrismaUIMeters.cpp`, not config.
+**Runtime:** `enable_prisma_hud` defaults to **false** in `ercf.toml` (WebView2 can freeze on some setups). When enabled, `CreateView` runs on `kDataLoaded` after `RequestPluginAPI` (same timing idea as Souls Style Looting). There is **no** background poll: **buildup** uses hit-deferred `OnPlayerBuildupHudEvent` plus `EmitPrismaHudBuildupRefresh()` → `try_update`; **decay** on the bar uses `Actor::Update` → `QueueFlushTask` → the same `OnPlayerBuildupHudEvent` path when player meters change; **proc-banner** expiry runs on player `Actor::Update`. Main menu opens hide the overlay and clear cached HUD state. Interop throttling and first-Show grace are fixed constants in `PrismaUIMeters.cpp`, not config.
 
 ---
 

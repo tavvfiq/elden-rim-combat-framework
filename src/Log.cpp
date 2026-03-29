@@ -18,11 +18,16 @@ namespace ERCFLog
 
 		void WriteLine(const char* msg)
 		{
+			std::lock_guard<std::mutex> lock{s_lock};
+			if (s_logPath.empty()) {
+				if (auto logDir = SKSE::log::log_directory()) {
+					s_logPath = *logDir / "ERCF.log";
+				}
+			}
 			if (s_logPath.empty()) {
 				return;
 			}
 
-			std::lock_guard<std::mutex> lock{s_lock};
 			std::ofstream f{s_logPath, std::ios::app};
 			if (!f) {
 				return;
@@ -47,8 +52,37 @@ namespace ERCFLog
 	{
 		if (auto logDir = SKSE::log::log_directory()) {
 			s_logPath = *logDir / "ERCF.log";
-			Line("ERCF: log init");
+			// Fresh log each Skyrim launch (plugin load).
+			{
+				std::ofstream f{s_logPath, std::ios::trunc};
+			}
 		}
+		Line("ERCF: log init");
+	}
+
+	void EnsureLogPath()
+	{
+		std::lock_guard<std::mutex> lock{s_lock};
+		if (!s_logPath.empty()) {
+			return;
+		}
+		if (auto logDir = SKSE::log::log_directory()) {
+			s_logPath = *logDir / "ERCF.log";
+		}
+	}
+
+	void TruncateForGameplaySession()
+	{
+		std::lock_guard<std::mutex> lock{s_lock};
+		if (s_logPath.empty()) {
+			if (auto logDir = SKSE::log::log_directory()) {
+				s_logPath = *logDir / "ERCF.log";
+			}
+		}
+		if (s_logPath.empty()) {
+			return;
+		}
+		std::ofstream f{s_logPath, std::ios::trunc};
 	}
 
 	void Line(const char* msg)

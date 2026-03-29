@@ -89,6 +89,4 @@ debug_status_decay = false
 # Status meters + proc banner (PrismaUI / WebView2). Default off. Requires PrismaUI.dll.
 # CreateView runs on kDataLoaded (same idea as Souls Style Looting). Throttling is fixed in code.
 enable_prisma_hud = false
-# Seconds between background meter polls (decay on the bar, proc-banner expiry). Hit buildup still updates immediately.
-prisma_hud_poll_interval_seconds = 0.5
 

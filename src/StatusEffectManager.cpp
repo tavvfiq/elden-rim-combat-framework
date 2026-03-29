@@ -3,7 +3,7 @@
 #include "StatusEffectManager.h"
 
 #include "Config.h"
-#include "ERLSIntegration.h"
+#include "ERASIntegration.h"
 #include "EspRouting.h"
 #include "Log.h"
 #include "Messaging.h"
@@ -74,11 +74,38 @@ namespace ERCF
 				double nextTickSec = 0.0;
 				std::uint32_t ticksRemaining = 0;
 				float tickDamage = 0.0f;
+				// Per 1s tick: drain buildup meter by this amount (immunity_at_pop / 90).
+				float meterDrainPerTick = 0.0f;
 			};
 
 			std::unordered_map<std::uint32_t, PoisonDotState> s_poisonDots;
 			std::unordered_map<std::uint32_t, PoisonDotState> s_rotDots;
 			std::unordered_set<std::uint32_t> g_formIdsWithActiveDots;
+
+			// Pop queued but deferred flush has not started DoT/debuff yet — block buildup like active effect.
+			std::unordered_set<std::uint32_t> g_poisonProcApplyPending;
+			std::unordered_set<std::uint32_t> g_rotProcApplyPending;
+			std::unordered_set<std::uint32_t> g_frostProcApplyPending;
+
+			// --- Frostbite buildup meter drain (30 x 1s ticks, robustness_at_pop / 30 per tick) ---
+			struct FrostbiteMeterDecayState
+			{
+				double nextTickSec = 0.0;
+				std::uint32_t ticksRemaining = 0;
+				float meterDrainPerTick = 0.0f;
+			};
+
+			std::unordered_map<std::uint32_t, FrostbiteMeterDecayState> s_frostbiteMeterDecay;
+			std::unordered_set<std::uint32_t> g_formIdsWithFrostbiteMeterDecay;
+
+			void RefreshFrostbiteMeterDecayMembership(std::uint32_t a_formId)
+			{
+				if (s_frostbiteMeterDecay.contains(a_formId)) {
+					g_formIdsWithFrostbiteMeterDecay.insert(a_formId);
+				} else {
+					g_formIdsWithFrostbiteMeterDecay.erase(a_formId);
+				}
+			}
 
 			// --- Timed debuffs (Frostbite, Sleep) — expiry processed on Actor::Update ---
 			std::unordered_map<std::uint32_t, double> s_frostbiteUntilSec;
@@ -87,6 +114,8 @@ namespace ERCF
 			std::unordered_set<std::uint32_t> g_formIdsWithTimedDebuffs;
 
 			constexpr double kFrostbiteDurationSec = 30.0;
+			constexpr std::uint32_t kPoisonRotDotTicks = 90;
+			constexpr std::uint32_t kFrostbiteMeterDecayTicks = 30;
 			constexpr double kSleepParalyzeDurationSec = 5.0;
 			constexpr float kFrostbiteDamageTakenMult = 1.20f;
 			constexpr float kFrostbiteStaminaRateMultDelta = -0.50f;
@@ -111,6 +140,28 @@ namespace ERCF
 				}
 			}
 
+			[[nodiscard]] bool MeterSlotEligibleForConfigDecay(
+				std::uint32_t a_formId,
+				std::uint8_t a_slot,
+				float a_meter,
+				bool a_decayEnabled)
+			{
+				if (!a_decayEnabled || a_meter <= 0.0f) {
+					return false;
+				}
+				if (a_slot == 0u) {
+					return !s_poisonDots.contains(a_formId) && !g_poisonProcApplyPending.contains(a_formId);
+				}
+				if (a_slot == 2u) {
+					return !s_rotDots.contains(a_formId) && !g_rotProcApplyPending.contains(a_formId);
+				}
+				if (a_slot == 3u) {
+					return !s_frostbiteMeterDecay.contains(a_formId) &&
+						!s_frostbiteUntilSec.contains(a_formId) && !g_frostProcApplyPending.contains(a_formId);
+				}
+				return true;
+			}
+
 			struct MaxStats
 			{
 				float maxHP = 0.0f;
@@ -124,14 +175,12 @@ namespace ERCF
 				if (!a_actor) {
 					return out;
 				}
-				if (a_actor->IsPlayerRef()) {
-					ERLS_API::PlayerStatsSnapshot snap{};
-					if (ERCF::ERLS::TryGetPlayerSnapshot(snap)) {
-						out.maxHP = static_cast<float>(snap.derived.maxHP);
-						out.maxMP = static_cast<float>(snap.derived.maxMP);
-						out.maxSP = static_cast<float>(snap.derived.maxSP);
-						return out;
-					}
+				ERAS_API::PlayerStatsSnapshot snap{};
+				if (ERCF::ERAS::TryGetActorSnapshot(a_actor, snap)) {
+					out.maxHP = static_cast<float>(snap.derived.maxHP);
+					out.maxMP = static_cast<float>(snap.derived.maxMP);
+					out.maxSP = static_cast<float>(snap.derived.maxSP);
+					return out;
 				}
 				if (auto* av = a_actor->AsActorValueOwner()) {
 					out.maxHP = av->GetPermanentActorValue(RE::ActorValue::kHealth);
@@ -208,9 +257,21 @@ namespace ERCF
 				auto* target = RE::TESForm::LookupByID<RE::Actor>(a_msg.targetFormId);
 				if (!target) {
 					ERCFLog::LineF("ERCF: ApplyStatusProc: target Actor not found (formId=%u)", a_msg.targetFormId);
+					{
+						std::lock_guard<std::mutex> lock{ g_mutex };
+						g_poisonProcApplyPending.erase(a_msg.targetFormId);
+						g_rotProcApplyPending.erase(a_msg.targetFormId);
+						g_frostProcApplyPending.erase(a_msg.targetFormId);
+					}
 					return;
 				}
 				if (target->IsDead()) {
+					{
+						std::lock_guard<std::mutex> lock{ g_mutex };
+						g_poisonProcApplyPending.erase(a_msg.targetFormId);
+						g_rotProcApplyPending.erase(a_msg.targetFormId);
+						g_frostProcApplyPending.erase(a_msg.targetFormId);
+					}
 					return;
 				}
 
@@ -243,13 +304,20 @@ namespace ERCF
 						return;
 					}
 					const double now = NowSeconds();
+					const std::uint32_t fid = a_msg.targetFormId;
+					const float refTh =
+						a_msg.meterDecayReferenceThreshold > 0.0f ? a_msg.meterDecayReferenceThreshold :
+																	a_msg.meterBeforePop;
+					const float drainPerTick = refTh / static_cast<float>(kPoisonRotDotTicks);
 					{
 						std::lock_guard<std::mutex> lock{ g_mutex };
-						auto& st = s_poisonDots[target->GetFormID()];
+						g_poisonProcApplyPending.erase(fid);
+						auto& st = s_poisonDots[fid];
 						st.tickDamage = tick;
-						st.ticksRemaining = 90;
+						st.ticksRemaining = kPoisonRotDotTicks;
 						st.nextTickSec = now + 1.0;
-						RefreshDotsMembership(target->GetFormID());
+						st.meterDrainPerTick = drainPerTick;
+						RefreshDotsMembership(fid);
 					}
 					return;
 				}
@@ -261,13 +329,20 @@ namespace ERCF
 						return;
 					}
 					const double now = NowSeconds();
+					const std::uint32_t fid = a_msg.targetFormId;
+					const float refTh =
+						a_msg.meterDecayReferenceThreshold > 0.0f ? a_msg.meterDecayReferenceThreshold :
+																	a_msg.meterBeforePop;
+					const float drainPerTick = refTh / static_cast<float>(kPoisonRotDotTicks);
 					{
 						std::lock_guard<std::mutex> lock{ g_mutex };
-						auto& st = s_rotDots[target->GetFormID()];
+						g_rotProcApplyPending.erase(fid);
+						auto& st = s_rotDots[fid];
 						st.tickDamage = tick;
-						st.ticksRemaining = 90;
+						st.ticksRemaining = kPoisonRotDotTicks;
 						st.nextTickSec = now + 1.0;
-						RefreshDotsMembership(target->GetFormID());
+						st.meterDrainPerTick = drainPerTick;
+						RefreshDotsMembership(fid);
 					}
 					return;
 				}
@@ -282,13 +357,25 @@ namespace ERCF
 					if (auto* avOwner = target->AsActorValueOwner()) {
 						avOwner->RestoreActorValue(RE::ACTOR_VALUE_MODIFIER::kDamage, RE::ActorValue::kHealth, -dmg);
 						const double now = NowSeconds();
+						const std::uint32_t fid = a_msg.targetFormId;
+						const float refTh =
+							a_msg.meterDecayReferenceThreshold > 0.0f ? a_msg.meterDecayReferenceThreshold :
+																		a_msg.meterBeforePop;
+						const float drainPerTick = refTh / static_cast<float>(kFrostbiteMeterDecayTicks);
 						std::lock_guard<std::mutex> lock{ g_mutex };
-						s_frostbiteUntilSec[target->GetFormID()] = now + kFrostbiteDurationSec;
-						if (!s_frostbiteStamDebuffApplied[target->GetFormID()]) {
+						g_frostProcApplyPending.erase(fid);
+						s_frostbiteUntilSec[fid] = now + kFrostbiteDurationSec;
+						FrostbiteMeterDecayState fdec{};
+						fdec.nextTickSec = now + 1.0;
+						fdec.ticksRemaining = kFrostbiteMeterDecayTicks;
+						fdec.meterDrainPerTick = drainPerTick;
+						s_frostbiteMeterDecay[fid] = fdec;
+						RefreshFrostbiteMeterDecayMembership(fid);
+						if (!s_frostbiteStamDebuffApplied[fid]) {
 							avOwner->ModActorValue(RE::ActorValue::kStaminaRateMult, kFrostbiteStaminaRateMultDelta);
-							s_frostbiteStamDebuffApplied[target->GetFormID()] = true;
+							s_frostbiteStamDebuffApplied[fid] = true;
 						}
-						RefreshTimedMembership(target->GetFormID());
+						RefreshTimedMembership(fid);
 					}
 					return;
 				}
@@ -340,7 +427,15 @@ namespace ERCF
 							s_frostbiteStamDebuffApplied.erase(itStam);
 						}
 						s_frostbiteUntilSec.erase(itF);
+						s_frostbiteMeterDecay.erase(a_formId);
+						RefreshFrostbiteMeterDecayMembership(a_formId);
 						RefreshTimedMembership(a_formId);
+						{
+							const auto tit = g_targets.find(a_formId);
+							if (tit != g_targets.end()) {
+								tit->second.frostbiteMeter = 0.0f;
+							}
+						}
 						if (hadStamDebuff && a_actor) {
 							if (auto* av = a_actor->AsActorValueOwner()) {
 								av->ModActorValue(RE::ActorValue::kStaminaRateMult, -kFrostbiteStaminaRateMultDelta);
@@ -362,6 +457,30 @@ namespace ERCF
 				}
 			}
 
+			void DrainPoisonRotMeterOnTick(
+				std::uint32_t a_formId,
+				float TargetState::* a_meterMember,
+				float a_drain,
+				RE::Actor* a_target)
+			{
+				if (a_drain <= 0.0f) {
+					return;
+				}
+				const auto tit = g_targets.find(a_formId);
+				if (tit == g_targets.end()) {
+					return;
+				}
+				float& m = tit->second.*a_meterMember;
+				const float sub = (std::min)(m, a_drain);
+				m -= sub;
+				if (m < 1e-5f) {
+					m = 0.0f;
+				}
+				if (a_target && a_target->IsPlayerRef()) {
+					g_playerBuildupHudDirty.store(true, std::memory_order_release);
+				}
+			}
+
 			void TickPoisonRotDotsForForm(
 				std::uint32_t a_formId,
 				RE::Actor* a_target,
@@ -372,11 +491,19 @@ namespace ERCF
 				if (!a_target || a_target->IsDead()) {
 					s_poisonDots.erase(a_formId);
 					s_rotDots.erase(a_formId);
+					g_poisonProcApplyPending.erase(a_formId);
+					g_rotProcApplyPending.erase(a_formId);
 					RefreshDotsMembership(a_formId);
+					const auto tit = g_targets.find(a_formId);
+					if (tit != g_targets.end()) {
+						tit->second.poisonMeter = 0.0f;
+						tit->second.rotMeter = 0.0f;
+					}
 					return;
 				}
 
-				const auto runMap = [&](std::unordered_map<std::uint32_t, PoisonDotState>& map) {
+				const auto runMap = [&](std::unordered_map<std::uint32_t, PoisonDotState>& map,
+									float TargetState::* a_meterMember) {
 					const auto it = map.find(a_formId);
 					if (it == map.end()) {
 						return;
@@ -390,6 +517,7 @@ namespace ERCF
 					if (a_nowSec >= st.nextTickSec) {
 						st.nextTickSec = a_nowSec + 1.0;
 						st.ticksRemaining--;
+						DrainPoisonRotMeterOnTick(a_formId, a_meterMember, st.meterDrainPerTick, a_target);
 						if (auto* avOwner = a_target->AsActorValueOwner()) {
 							avOwner->RestoreActorValue(
 								RE::ACTOR_VALUE_MODIFIER::kDamage,
@@ -399,12 +527,62 @@ namespace ERCF
 						if (st.ticksRemaining == 0) {
 							map.erase(it);
 							RefreshDotsMembership(a_formId);
+							const auto tit = g_targets.find(a_formId);
+							if (tit != g_targets.end()) {
+								float& m = tit->second.*a_meterMember;
+								m = 0.0f;
+							}
+							if (a_target->IsPlayerRef()) {
+								g_playerBuildupHudDirty.store(true, std::memory_order_release);
+							}
 						}
 					}
 				};
 
-				runMap(s_poisonDots);
-				runMap(s_rotDots);
+				runMap(s_poisonDots, &TargetState::poisonMeter);
+				runMap(s_rotDots, &TargetState::rotMeter);
+			}
+
+			void TickFrostbiteMeterDecayForForm(
+				std::uint32_t a_formId,
+				RE::Actor* a_target,
+				double a_nowSec)
+			{
+				const auto it = s_frostbiteMeterDecay.find(a_formId);
+				if (it == s_frostbiteMeterDecay.end()) {
+					return;
+				}
+				if (!a_target || a_target->IsDead()) {
+					s_frostbiteMeterDecay.erase(it);
+					RefreshFrostbiteMeterDecayMembership(a_formId);
+					const auto tit = g_targets.find(a_formId);
+					if (tit != g_targets.end()) {
+						tit->second.frostbiteMeter = 0.0f;
+					}
+					return;
+				}
+				auto& st = it->second;
+				if (st.ticksRemaining == 0) {
+					s_frostbiteMeterDecay.erase(it);
+					RefreshFrostbiteMeterDecayMembership(a_formId);
+					return;
+				}
+				if (a_nowSec >= st.nextTickSec) {
+					st.nextTickSec = a_nowSec + 1.0;
+					st.ticksRemaining--;
+					DrainPoisonRotMeterOnTick(a_formId, &TargetState::frostbiteMeter, st.meterDrainPerTick, a_target);
+					if (st.ticksRemaining == 0) {
+						s_frostbiteMeterDecay.erase(it);
+						RefreshFrostbiteMeterDecayMembership(a_formId);
+						const auto tit = g_targets.find(a_formId);
+						if (tit != g_targets.end()) {
+							tit->second.frostbiteMeter = 0.0f;
+						}
+						if (a_target->IsPlayerRef()) {
+							g_playerBuildupHudDirty.store(true, std::memory_order_release);
+						}
+					}
+				}
 			}
 
 			void FillProcRequirementSnapshotImpl(
@@ -562,7 +740,7 @@ namespace ERCF
 				bool a_decayEnabled)
 			{
 				const std::uint64_t key = MakeDecayKey(a_formId, a_slot);
-				if (!a_decayEnabled || a_meter <= 0.0f) {
+				if (!MeterSlotEligibleForConfigDecay(a_formId, a_slot, a_meter, a_decayEnabled)) {
 					g_decayTimers.erase(key);
 				} else {
 					g_decayTimers.insert(key);
@@ -659,6 +837,13 @@ namespace ERCF
 					}
 
 					const float meterBefore = *meter;
+					if (!MeterSlotEligibleForConfigDecay(
+							a_formId,
+							slot,
+							*meter,
+							a_cfg.status_meter_decay_enabled)) {
+						continue;
+					}
 					ApplyDecayOneMeter(*meter, *lastB, a_t0, a_t1, a_cfg);
 
 					constexpr float kLogEps = 1e-5f;
@@ -898,6 +1083,10 @@ namespace ERCF
 				if (!a_actor) {
 					return;
 				}
+				if (a_actor->IsPlayerRef()) {
+					Prisma::TickProcBannerExpiryOnPlayerUpdate();
+					Prisma::TickDeferredNativeHudHide();
+				}
 				const auto cfg = Config::Get();
 				if (ShouldPauseStatusDecayForMainMenu()) {
 					return;
@@ -916,9 +1105,10 @@ namespace ERCF
 					std::lock_guard<std::mutex> lock{ g_mutex };
 					const bool needDots = g_formIdsWithActiveDots.contains(fid);
 					const bool needTimed = g_formIdsWithTimedDebuffs.contains(fid);
+					const bool needFrostMeterDecay = g_formIdsWithFrostbiteMeterDecay.contains(fid);
 					const bool needDecay =
 						cfg.status_meter_decay_enabled && g_formIdsWithDecayMeters.contains(fid);
-					if (!needDots && !needTimed && !needDecay) {
+					if (!needDots && !needTimed && !needFrostMeterDecay && !needDecay) {
 						return;
 					}
 
@@ -933,6 +1123,9 @@ namespace ERCF
 					}
 					if (needDots) {
 						TickPoisonRotDotsForForm(fid, a_actor, t1, cfg);
+					}
+					if (needFrostMeterDecay) {
+						TickFrostbiteMeterDecayForForm(fid, a_actor, t1);
 					}
 
 					if (needDecay) {
@@ -966,6 +1159,11 @@ namespace ERCF
 						g_playerBuildupHudDirty.store(true, std::memory_order_release);
 						QueueFlushTask();
 					}
+				}
+
+				if (a_actor->IsPlayerRef() && cfg.enable_prisma_hud &&
+					g_playerBuildupHudDirty.load(std::memory_order_acquire)) {
+					QueueFlushTask();
 				}
 			}
 
@@ -1035,7 +1233,7 @@ namespace ERCF
 		Thresholds ComputeThresholds(
 			std::uint32_t a_targetFormId,
 			RE::Actor* a_target,
-			bool a_isPlayer,
+			bool /*a_isPlayer*/,
 			const Esp::StatusResistanceCoefficients& a_resist)
 		{
 			Thresholds out{};
@@ -1043,15 +1241,13 @@ namespace ERCF
 				return out;
 			}
 
-			if (a_isPlayer) {
-				ERLS_API::PlayerStatsSnapshot snap{};
-				if (ERCF::ERLS::TryGetPlayerSnapshot(snap)) {
-					out.immunity = snap.thresholds.immunity;
-					out.robustness = snap.thresholds.robustness;
-					out.focus = snap.thresholds.focus;
-					out.madness = snap.thresholds.madness;
-					return out;
-				}
+			ERAS_API::PlayerStatsSnapshot snap{};
+			if (ERCF::ERAS::TryGetActorSnapshot(a_target, snap)) {
+				out.immunity = snap.thresholds.immunity;
+				out.robustness = snap.thresholds.robustness;
+				out.focus = snap.thresholds.focus;
+				out.madness = snap.thresholds.madness;
+				return out;
 			}
 
 			std::lock_guard<std::mutex> lock{ g_mutex };
@@ -1135,6 +1331,34 @@ namespace ERCF
 				return;
 			}
 
+			switch (a_input.type) {
+			case Type::Poison:
+				if (s_poisonDots.contains(a_input.targetFormId) ||
+					g_poisonProcApplyPending.contains(a_input.targetFormId)) {
+					return;
+				}
+				break;
+			case Type::Rot:
+				if (s_rotDots.contains(a_input.targetFormId) ||
+					g_rotProcApplyPending.contains(a_input.targetFormId)) {
+					return;
+				}
+				break;
+			case Type::Frostbite: {
+				const auto itFr = s_frostbiteUntilSec.find(a_input.targetFormId);
+				if (itFr != s_frostbiteUntilSec.end() && nowSec < itFr->second) {
+					return;
+				}
+				if (s_frostbiteMeterDecay.contains(a_input.targetFormId) ||
+					g_frostProcApplyPending.contains(a_input.targetFormId)) {
+					return;
+				}
+				break;
+			}
+			default:
+				break;
+			}
+
 			const float before = *meter;
 			AccumulateAfterSync(*meter, *lastSec, a_input.payload, cfg, nowSec);
 
@@ -1143,17 +1367,28 @@ namespace ERCF
 			}
 
 			if (a_input.threshold > 0.0f && *meter >= a_input.threshold) {
-				*meter = 0.0f;
+				const bool gradualPoisonRotFrost = a_input.type == Type::Poison || a_input.type == Type::Rot ||
+					a_input.type == Type::Frostbite;
+				if (!gradualPoisonRotFrost) {
+					*meter = 0.0f;
+				}
 				*lastSec = nowSec;
 
 				switch (a_input.type) {
 				case Type::Poison:
+					st.immunityProcCount += 1;
+					g_poisonProcApplyPending.insert(a_input.targetFormId);
+					break;
 				case Type::Rot:
 					st.immunityProcCount += 1;
+					g_rotProcApplyPending.insert(a_input.targetFormId);
 					break;
 				case Type::Bleed:
+					st.robustnessProcCount += 1;
+					break;
 				case Type::Frostbite:
 					st.robustnessProcCount += 1;
+					g_frostProcApplyPending.insert(a_input.targetFormId);
 					break;
 				case Type::Sleep:
 					st.focusProcCount += 1;
@@ -1179,6 +1414,9 @@ namespace ERCF
 				msg.procContextFlags = kProcCtxRequirementSnapshotValid;
 				if (a_input.targetIsBoss) {
 					msg.procContextFlags |= kProcCtxTargetIsBoss;
+				}
+				if (gradualPoisonRotFrost) {
+					msg.meterDecayReferenceThreshold = a_input.threshold;
 				}
 				PushPop(msg);
 

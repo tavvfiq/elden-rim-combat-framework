@@ -3,7 +3,7 @@
 #include "Log.h"
 #include "Messaging.h"
 #include "Config.h"
-#include "ERLSIntegration.h"
+#include "ERASIntegration.h"
 #include "HitEventHandler.h"
 #include "PrismaUIMeters.h"
 #include "OverrideDamageHook.h"
@@ -58,23 +58,21 @@ namespace
 		}
 		switch (a_msg->type) {
 		case SKSE::MessagingInterface::kDataLoaded:
+			ERCFLog::EnsureLogPath();
 			ERCFLog::Line("ERCF: kDataLoaded");
 			ERCF::Config::Load();
-			ERCF::ERLS::Init();
+			ERCF::ERAS::Init();
 			ERCF::Override::Install();
 			ERCF::Runtime::HitEventHandler::Register();
 			ERCF::StatusEffects::InstallActorDecayHook();
 			ERCF::Prisma::Init();
-			// Do not start SKSE task polling here — title menu + Prisma can deadlock/freeze if we hammer tasks.
-			// Polling starts after a session exists (kPostLoadGame / kNewGame).
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
+			ERCFLog::TruncateForGameplaySession();
 			ERCFLog::Line("ERCF: kPostLoadGame");
-			// StartPeriodicHudRefresh synchronously from the messaging callback hard-freezes on some setups;
-			// defer onto the SKSE game thread (same work, safe timing).
-			ERCF::Prisma::QueueStartPeriodicHudRefresh();
 			break;
 		case SKSE::MessagingInterface::kNewGame:
+			ERCFLog::TruncateForGameplaySession();
 			ERCFLog::Line("ERCF: kNewGame");
 			// Safety: avoid auto-starting Prisma on New Game path (observed freeze-prone).
 			// HUD can still be started later through safer runtime paths.

@@ -71,7 +71,7 @@ namespace ERCF
 			float madness = 0.0f;
 		};
 
-		// Fills weapon physical + target max stats (ERLS for player target when available).
+		// Fills weapon physical + target max stats (ERAS for player target when available).
 		void FillProcRequirementSnapshot(RE::Actor* a_attacker, RE::Actor* a_target, ProcRequirementSnapshot& a_out);
 
 		// Applies proc damage/effects (same rules as legacy Proc::ApplyStatusProc). Safe from messaging listener

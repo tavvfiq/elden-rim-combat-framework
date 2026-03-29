@@ -3,7 +3,6 @@
 #include "PrismaUIMeters.h"
 
 #include "Config.h"
-#include "HitEventHandler.h"
 #include "Messaging.h"
 #include "PrismaUI_API.h"
 
@@ -36,7 +35,6 @@ namespace ERCF
 
 			std::atomic<bool> g_domReady{ false };
 			std::atomic<bool> g_initialized{ false };
-			std::atomic<bool> g_hudPollDesired{ false };
 
 			float g_poison = 0.0f;
 			float g_bleed = 0.0f;
@@ -54,7 +52,6 @@ namespace ERCF
 			float g_lastSentSleep = -1.0f;
 			float g_lastSentMadness = -1.0f;
 			bool g_forceNextPrismaPush = false;
-			bool g_forcePollHudPush = false;
 
 			// steady_clock seconds — after on_dom_ready SKSE task finishes initial Interop+Hide (first Show gate).
 			std::atomic<double> g_domInteropDoneWallSec{ 0.0 };
@@ -62,13 +59,15 @@ namespace ERCF
 			std::atomic<bool> g_hudFlushQueued{ false };
 
 			constexpr const char* VIEW_PATH = "ERCF/index.html";
-			// Coalesce stray hit-time updates; decay uses g_forcePollHudPush each poll tick instead.
 			constexpr float kMeterSendEpsilon = 0.12f;
 			constexpr float kMeterVisibleEpsilon = 1e-4f;
 			constexpr double kProcBannerHoldSeconds = 3.5;
 			// Fixed WebView2 pacing (not exposed in ercf.toml — Souls Style Looting uses no equivalent knobs).
 			constexpr double kPrismaMinInteropIntervalSec = 0.2;
 			constexpr double kPrismaGraceAfterDomSec = 2.0;
+			// Must match `ui/src/ercfHud.css` (#ercf-hud-layer transition duration).
+			constexpr double kPrismaHudFadeOutWallSec = 0.32;
+			std::atomic<double> g_deferNativeHideUntilWallSec{ 0.0 };
 
 			std::mutex g_procBannerMutex;
 			bool g_procBannerPending = false;
@@ -132,10 +131,58 @@ namespace ERCF
 			float g_lastPublishedHudSleep = -1.0f;
 			float g_lastPublishedHudMadness = -1.0f;
 
-			void ensure_hud_poll_only();
 			void create_view_immediate();
 			bool try_update();
 			void request_hud_flush();
+
+			void cancel_deferred_native_hud_hide()
+			{
+				g_deferNativeHideUntilWallSec.store(0.0, std::memory_order_release);
+			}
+
+			void finish_deferred_native_hud_hide()
+			{
+				const double hadPending =
+					g_deferNativeHideUntilWallSec.exchange(0.0, std::memory_order_acq_rel);
+				if (hadPending <= 0.0) {
+					return;
+				}
+				if (!g_prismaViewShown || !g_api || !g_view || !g_domReady.load() || !g_api->IsValid(g_view)) {
+					g_prismaViewShown = false;
+					return;
+				}
+				g_api->Hide(g_view);
+				g_prismaViewShown = false;
+				g_lastSentPoison = -1.0f;
+				g_lastSentBleed = -1.0f;
+				g_lastSentRot = -1.0f;
+				g_lastSentFrostbite = -1.0f;
+				g_lastSentSleep = -1.0f;
+				g_lastSentMadness = -1.0f;
+				g_forceNextPrismaPush = false;
+			}
+
+			void try_complete_deferred_native_hud_hide()
+			{
+				const double until = g_deferNativeHideUntilWallSec.load(std::memory_order_acquire);
+				if (until <= 0.0) {
+					return;
+				}
+				const double nowSec = steady_now_sec();
+				if (nowSec < until) {
+					return;
+				}
+				finish_deferred_native_hud_hide();
+			}
+
+			void prisma_js_hud_fade_out_done(const char* /*argument*/)
+			{
+				if (auto* tasks = SKSE::GetTaskInterface()) {
+					tasks->AddTask([]() { finish_deferred_native_hud_hide(); });
+				} else {
+					finish_deferred_native_hud_hide();
+				}
+			}
 
 			struct PlayerHudSnapshot
 			{
@@ -147,10 +194,7 @@ namespace ERCF
 				float madness = 0.0f;
 			};
 
-			[[nodiscard]] bool PublishHudSnapshotIfChanged(
-				const PlayerHudSnapshot& a_next,
-				bool a_force,
-				bool a_fromPoll)
+			[[nodiscard]] bool PublishHudSnapshotIfChanged(const PlayerHudSnapshot& a_next, bool a_force)
 			{
 				constexpr float kFuzz = 1e-3f;
 				const bool haveBaseline = g_lastPublishedHudPoison >= 0.0f;
@@ -182,9 +226,6 @@ namespace ERCF
 				g_madness = a_next.madness;
 				// Force an immediate Interop batch (bypasses the minGap throttle).
 				g_forceNextPrismaPush = true;
-				if (a_fromPoll) {
-					g_forcePollHudPush = true;
-				}
 				request_hud_flush();
 				return true;
 			}
@@ -208,7 +249,6 @@ namespace ERCF
 				g_sleep = 0.0f;
 				g_madness = 0.0f;
 				g_forceNextPrismaPush = false;
-				g_forcePollHudPush = false;
 				g_lastSentPoison = -1.0f;
 				g_lastSentBleed = -1.0f;
 				g_lastSentRot = -1.0f;
@@ -223,6 +263,7 @@ namespace ERCF
 					g_procBannerPendingKind.clear();
 				}
 				g_procBannerVisibleUntil.store(0.0, std::memory_order_release);
+				cancel_deferred_native_hud_hide();
 			}
 
 			void prisma_clear_proc_banner_dom()
@@ -255,6 +296,7 @@ namespace ERCF
 
 			void prisma_hide_overlay_on_game_thread()
 			{
+				cancel_deferred_native_hud_hide();
 				if (!g_api || !g_view || !g_domReady.load()) {
 					g_prismaViewShown = false;
 					return;
@@ -277,9 +319,8 @@ namespace ERCF
 				prisma_hide_overlay_on_game_thread();
 			}
 
-			void stop_hud_poll_and_hide()
+			void stop_hud_overlay_for_menu()
 			{
-				g_hudPollDesired.store(false, std::memory_order_release);
 				g_domInteropDoneWallSec.store(0.0, std::memory_order_release);
 				clear_hud_meter_state_no_prisma();
 				// Never call Prisma Hide from MenuOpenCloseEvent / other BST sinks (re-entrancy freeze).
@@ -299,12 +340,7 @@ namespace ERCF
 						return RE::BSEventNotifyControl::kContinue;
 					}
 					if (a_event->opening && a_event->menuName == RE::MainMenu::MENU_NAME) {
-						stop_hud_poll_and_hide();
-					}
-					// If kPostLoadGame never fires, poll may have stopped at title; restart when load finishes.
-					// View already exists (Souls-style kDataLoaded path) — do not CreateView here.
-					if (!a_event->opening && a_event->menuName == RE::LoadingMenu::MENU_NAME && g_view != 0) {
-						// ensure_hud_poll_only();
+						stop_hud_overlay_for_menu();
 					}
 					return RE::BSEventNotifyControl::kContinue;
 				}
@@ -349,6 +385,7 @@ namespace ERCF
 						g_lastSentSleep = -1.0f;
 						g_lastSentMadness = -1.0f;
 						if (g_api && g_view && g_api->IsValid(g_view)) {
+							g_api->RegisterJSListener(g_view, "ercfHudFadeOutDone", prisma_js_hud_fade_out_done);
 							const std::string poisonArg = std::to_string(g_poison);
 							const std::string bleedArg = std::to_string(g_bleed);
 							const std::string rotArg = std::to_string(g_rot);
@@ -373,6 +410,7 @@ namespace ERCF
 				} else {
 					g_domReady.store(true, std::memory_order_release);
 					if (g_api && g_view && g_api->IsValid(g_view)) {
+						g_api->RegisterJSListener(g_view, "ercfHudFadeOutDone", prisma_js_hud_fade_out_done);
 						const std::string poisonArg = std::to_string(g_poison);
 						const std::string bleedArg = std::to_string(g_bleed);
 						const std::string rotArg = std::to_string(g_rot);
@@ -408,6 +446,7 @@ namespace ERCF
 
 				if (should_suppress_meters_hud()) {
 					// Never touch WebView2 while menus/loading are open.
+					cancel_deferred_native_hud_hide();
 					g_prismaViewShown = false;
 					g_lastSentPoison = -1.0f;
 					g_lastSentBleed = -1.0f;
@@ -416,7 +455,6 @@ namespace ERCF
 					g_lastSentSleep = -1.0f;
 					g_lastSentMadness = -1.0f;
 					g_forceNextPrismaPush = false;
-					g_forcePollHudPush = false;
 					return false;
 				}
 
@@ -434,6 +472,8 @@ namespace ERCF
 				if (!g_api->IsValid(g_view)) {
 					return false;
 				}
+
+				try_complete_deferred_native_hud_hide();
 
 				const double nowSec = steady_now_sec();
 
@@ -454,6 +494,7 @@ namespace ERCF
 					}
 				}
 				if (!bannerKind.empty()) {
+					cancel_deferred_native_hud_hide();
 					if (!g_prismaViewShown) {
 						g_api->Show(g_view);
 						g_prismaViewShown = true;
@@ -472,7 +513,6 @@ namespace ERCF
 					g_lastSentSleep = 0.0f;
 					g_lastSentMadness = 0.0f;
 					g_forceNextPrismaPush = false;
-					g_forcePollHudPush = false;
 					g_procBannerVisibleUntil.store(nowSec + kProcBannerHoldSeconds, std::memory_order_release);
 					return true;
 				}
@@ -483,27 +523,25 @@ namespace ERCF
 				if (!anyMeter && !bannerHoldActive) {
 					if (g_prismaViewShown) {
 						push_meters_zero_to_dom_if_ready();
-						g_api->Hide(g_view);
-						g_prismaViewShown = false;
+						const double pending =
+							g_deferNativeHideUntilWallSec.load(std::memory_order_acquire);
+						if (pending <= 0.0) {
+							g_deferNativeHideUntilWallSec.store(
+								nowSec + kPrismaHudFadeOutWallSec,
+								std::memory_order_release);
+						}
+					} else {
+						cancel_deferred_native_hud_hide();
 					}
-					g_lastSentPoison = -1.0f;
-					g_lastSentBleed = -1.0f;
-					g_lastSentRot = -1.0f;
-					g_lastSentFrostbite = -1.0f;
-					g_lastSentSleep = -1.0f;
-					g_lastSentMadness = -1.0f;
-					g_forceNextPrismaPush = false;
-					g_forcePollHudPush = false;
 					return false;
 				}
+
+				cancel_deferred_native_hud_hide();
 
 				if (!anyMeter && bannerHoldActive) {
 					push_meters_zero_to_dom_if_ready();
 					return g_prismaViewShown;
 				}
-
-				const bool pollPushThisTick = g_forcePollHudPush;
-				g_forcePollHudPush = false;
 
 				const auto crossed = [](float last, float cur) {
 					return (last <= kMeterVisibleEpsilon && cur > kMeterVisibleEpsilon) ||
@@ -527,8 +565,8 @@ namespace ERCF
 				const bool forcedHitPush = g_forceNextPrismaPush;
 				const bool anyCrossedZero = crossedZeroPoison || crossedZeroBleed || crossedZeroRot ||
 					crossedZeroFrost || crossedZeroSleep || crossedZeroMadness;
-				const bool needInterop = forcedHitPush || pollPushThisTick || anyCrossedZero ||
-					poisonMoved || bleedMoved || rotMoved || frostMoved || sleepMoved || madnessMoved;
+				const bool needInterop = forcedHitPush || anyCrossedZero || poisonMoved || bleedMoved ||
+					rotMoved || frostMoved || sleepMoved || madnessMoved;
 
 				if (!needInterop) {
 					return g_prismaViewShown;
@@ -613,74 +651,22 @@ namespace ERCF
 				}
 			}
 
-			void schedule_hud_poll()
+			void tick_proc_banner_expiry_from_player_update()
 			{
-				if (!g_hudPollDesired.load(std::memory_order_acquire)) {
+				if (!ERCF::Config::Get().enable_prisma_hud || !g_api) {
 					return;
 				}
-				auto* tasks = SKSE::GetTaskInterface();
-				if (!tasks) {
+				const double until = g_procBannerVisibleUntil.load(std::memory_order_acquire);
+				if (until <= 0.0) {
 					return;
 				}
-				tasks->AddTask([]() {
-					if (!g_hudPollDesired.load(std::memory_order_acquire)) {
-						return;
-					}
-					const auto& cfg = ERCF::Config::Get();
-					using clock = std::chrono::steady_clock;
-					using sec = std::chrono::duration<double>;
-					const double nowSec =
-						std::chrono::duration_cast<sec>(clock::now().time_since_epoch()).count();
-
-					static double s_lastDecayRefreshSec = 0.0;
-
-					// Menus / title: try_update throttled — still responsive without hammering WebView2.
-					if (should_suppress_meters_hud()) {
-						// IMPORTANT: do not keep polling on menus.
-						// This task runs on the SKSE task thread and re-scheduling it every frame while
-						// MainMenu/LoadingMenu are open can hard-freeze some setups (WebView2/interop path).
-						// We'll restart polling when menus close (see MenuOpenCloseEvent sink).
-						if (g_prismaViewShown) {
-							prisma_hide_overlay_on_game_thread();
-						}
-						g_hudPollDesired.store(false, std::memory_order_release);
-						return;
-					}
-
-					// Decay / drift only (buildup uses OnPlayerBuildupHudEvent from hit-deferred task).
-					const double pollSec = static_cast<double>(cfg.prisma_hud_poll_interval_seconds);
-					if (pollSec > 0.0) {
-						const bool due =
-							s_lastDecayRefreshSec == 0.0 || (nowSec - s_lastDecayRefreshSec) >= pollSec;
-						if (due) {
-							s_lastDecayRefreshSec = nowSec;
-							PlayerHudSnapshot snap{};
-							StatusEffects::PlayerMetersHudSnapshot m{};
-							if (ERCF::Runtime::TryGetPlayerMetersHudSnapshot(m)) {
-								snap.poison = m.poison;
-								snap.bleed = m.bleed;
-								snap.rot = m.rot;
-								snap.frostbite = m.frostbite;
-								snap.sleep = m.sleep;
-								snap.madness = m.madness;
-							}
-							// Poll is the decay/drift reconcile path — only push if changed.
-							if (PublishHudSnapshotIfChanged(snap, false, true)) {
-								request_hud_flush();
-							}
-						}
-					}
-
-					// Proc-banner expiry is handled inside try_update(); flush must run on the poll tick even when
-					// meter snapshots are unchanged, or the DOM stays visible until the next unrelated HUD event.
-					if (g_procBannerVisibleUntil.load(std::memory_order_acquire) > 0.0) {
-						request_hud_flush();
-					}
-
-					if (g_hudPollDesired.load(std::memory_order_acquire)) {
-						schedule_hud_poll();
-					}
-				});
+				const double nowSec = steady_now_sec();
+				if (nowSec < until) {
+					return;
+				}
+				prisma_clear_proc_banner_dom();
+				g_procBannerVisibleUntil.store(0.0, std::memory_order_release);
+				request_hud_flush();
 			}
 
 			void create_view_immediate()
@@ -696,18 +682,6 @@ namespace ERCF
 				ERCFLog::Line("ERCF: PrismaUI view created on kDataLoaded (Souls-style)");
 			}
 
-			// Starts SKSE poll chain (meter snapshots + proc-banner expiry). CreateView already ran on kDataLoaded.
-			void ensure_hud_poll_only()
-			{
-				if (!ERCF::Config::Get().enable_prisma_hud || !g_api) {
-					return;
-				}
-				const bool wasRunning = g_hudPollDesired.exchange(true, std::memory_order_acq_rel);
-				if (!wasRunning) {
-					ERCFLog::Line("ERCF: Prisma HUD poll started (meters)");
-					schedule_hud_poll();
-				}
-			}
 		}
 
 		void Init()
@@ -732,38 +706,7 @@ namespace ERCF
 
 			// Souls Style Looting pattern: CreateView from kDataLoaded after RequestPluginAPI.
 			create_view_immediate();
-			QueueStartPeriodicHudRefresh();
 			ERCFLog::Line("ERCF: PrismaUI API acquired (CreateView on kDataLoaded)");
-		}
-
-		void StartPeriodicHudRefresh()
-		{
-			if (!ERCF::Config::Get().enable_prisma_hud) {
-				return;
-			}
-			if (!g_api) {
-				return;
-			}
-			ensure_hud_poll_only();
-			ERCFLog::Line("ERCF: Prisma: session HUD refresh (poll armed)");
-		}
-
-		void StopPeriodicHudRefresh()
-		{
-			stop_hud_poll_and_hide();
-		}
-
-		void QueueStartPeriodicHudRefresh()
-		{
-			const auto& cfg = ERCF::Config::Get();
-			if (!cfg.enable_prisma_hud) {
-				return;
-			}
-			if (auto* tasks = SKSE::GetTaskInterface()) {
-				tasks->AddTask([]() { StartPeriodicHudRefresh(); });
-			} else {
-				StartPeriodicHudRefresh();
-			}
 		}
 
 		void OnPlayerBuildupHudEvent(
@@ -786,7 +729,7 @@ namespace ERCF
 			snap.frostbite = frostbiteForHud;
 			snap.sleep = sleepForHud;
 			snap.madness = madnessForHud;
-			if (!PublishHudSnapshotIfChanged(snap, false, false)) {
+			if (!PublishHudSnapshotIfChanged(snap, false)) {
 				return;
 			}
 			// Snapshot submit only — manager coalesces and schedules a safe flush.
@@ -801,6 +744,16 @@ namespace ERCF
 		void QueuePlayerStatusProcBanner(std::uint32_t a_statusId)
 		{
 			queue_player_status_proc_banner(a_statusId);
+		}
+
+		void TickProcBannerExpiryOnPlayerUpdate()
+		{
+			tick_proc_banner_expiry_from_player_update();
+		}
+
+		void TickDeferredNativeHudHide()
+		{
+			try_complete_deferred_native_hud_hide();
 		}
 	}
 }

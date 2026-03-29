@@ -96,9 +96,6 @@ namespace ERCF
 			// PrismaUI WebView2 overlay for status meters + proc banner (same CreateView-on-kDataLoaded pattern as
 			// Souls Style Looting). Default off — WebView2 can freeze on some setups; requires PrismaUI.dll.
 			bool enable_prisma_hud = false;
-
-			// Seconds between background meter snapshots (decay sync + proc-banner timer). Buildup still pushes on hits.
-			float prisma_hud_poll_interval_seconds = 0.5f;
 		};
 
 		// Loads config from Data/SKSE/Plugins/<plugin>/ercf.toml (using SKSE log directory).

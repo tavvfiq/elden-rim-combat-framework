@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type MeterKey = "poison" | "bleed" | "rot" | "frostbite" | "sleep" | "madness";
 
@@ -50,6 +50,8 @@ declare global {
     setMadnessMeter?: (arg: string) => void;
     showStatusProcBanner?: (kindRaw: string) => void;
     clearProcBanner?: () => void;
+    /** PrismaUI RegisterJSListener bridge — notifies native after HUD opacity fade-out. */
+    ercfHudFadeOutDone?: (arg: string) => void;
   }
 }
 
@@ -57,6 +59,9 @@ export function App() {
   const [meters, setMeters] = useState<MetersState>(ZERO_METERS);
   const [bannerKind, setBannerKind] = useState<string | null>(null);
   const [bannerVisible, setBannerVisible] = useState(false);
+  /** Delay `is-visible` one paint after content should show so WebView2 can animate opacity in. */
+  const [hudFadeInArm, setHudFadeInArm] = useState(false);
+  const hudLayerRef = useRef<HTMLDivElement>(null);
 
   const assetBase = import.meta.env.BASE_URL;
 
@@ -111,10 +116,50 @@ export function App() {
     [meters],
   );
 
+  const hudLayerVisible = anyMeterVisible || bannerKind !== null;
+
+  useEffect(() => {
+    if (!hudLayerVisible) {
+      setHudFadeInArm(false);
+      return;
+    }
+    setHudFadeInArm(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setHudFadeInArm(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [hudLayerVisible]);
+
+  useEffect(() => {
+    const el = hudLayerRef.current;
+    if (!el) {
+      return;
+    }
+    const onTransitionEnd = (e: TransitionEvent) => {
+      if (e.target !== el || e.propertyName !== "opacity") {
+        return;
+      }
+      if (el.classList.contains("is-visible")) {
+        return;
+      }
+      window.ercfHudFadeOutDone?.("");
+    };
+    el.addEventListener("transitionend", onTransitionEnd);
+    return () => el.removeEventListener("transitionend", onTransitionEnd);
+  }, []);
+
   const bannerLabel = bannerKind ? BANNER_LABELS[bannerKind] ?? "" : "";
 
   return (
-    <>
+    <div
+      ref={hudLayerRef}
+      id="ercf-hud-layer"
+      className={hudLayerVisible && hudFadeInArm ? "is-visible" : ""}
+    >
       <div
         id="proc-banner-root"
         className={bannerVisible && bannerKind ? "is-visible" : ""}
@@ -162,6 +207,6 @@ export function App() {
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
