@@ -1,22 +1,8 @@
 -- set minimum xmake version
 set_xmakever("2.8.2")
 
--- Locate local CommonLibSSE-NG xmake scripts (plugin rule).
---
--- Override via:
---   xmake f --commonlibsse_dir="D:/path/to/CommonLibSSE-NG"
-option("commonlibsse_dir")
-    set_default("../CommonLibSSE-NG")
-    set_showmenu(true)
-    set_description("Path to local CommonLibSSE-NG checkout")
-option_end()
-
-local commonlib_dir = get_config("commonlibsse_dir") or "../CommonLibSSE-NG"
-if os.isdir(commonlib_dir) then
-    includes(path.join(commonlib_dir, "xmake.lua"))
-else
-    raise("CommonLibSSE-NG not found at '" .. commonlib_dir .. "'. Configure with: xmake f --commonlibsse_dir=\"D:/path/to/CommonLibSSE-NG\"")
-end
+-- Make sure xmake can find the local CommonLibSSE-NG xmake scripts (plugin rule).
+includes("D:/Modding/CommonLibSSE-NG")
 
 -- set project
 set_project("ERCF")

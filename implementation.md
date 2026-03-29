@@ -61,6 +61,8 @@ Stack: **ESP** (authoritative data) + **SKSE C++ plugin** (runtime pipeline, eve
 
 **Principle:** HUD reflects plugin state over the native API; **no** Papyrus bridge required for UI.
 
+**Runtime:** `enable_prisma_hud` defaults to **false** in `ercf.toml` (WebView2 can freeze on some setups). When enabled, `CreateView` runs on `kDataLoaded` after `RequestPluginAPI` (same timing idea as Souls Style Looting). **Buildup** updates use hit-deferred `OnPlayerBuildupHudEvent` plus `EmitPrismaHudBuildupRefresh()` → `OnPrismaHudBuildupMessaging` → `try_update`. **Decay** on the bar is sampled on a background poll at `prisma_hud_poll_interval_seconds` (menus/title stop the poll and hide the overlay). Interop throttling and first-Show grace are fixed constants in `PrismaUIMeters.cpp`, not config.
+
 ---
 
 ## 4. CommonLibSSE-NG
@@ -125,27 +127,25 @@ This checklist is designed to validate the current v1 vertical slice: hit interc
 
 ### A. Setup (ESP authoring)
 
-Ensure the test attacker/weapon/spell (or its active MGEF deliverer) provides at least:
+Ensure the test **weapon instance enchantment** (and/or `HitData::attackDataSpell` if you test spell hits) provides at least:
 
-- Poison buildup payload active effect(s):
-  - MGEF keywords: `ERCF.MGEF.Buildup` + `ERCF.Status.Poison`
-  - magnitude = desired poison payload
-- Bleed buildup payload active effect(s):
-  - MGEF keywords: `ERCF.MGEF.Buildup` + `ERCF.Status.Bleed`
-  - magnitude = desired bleed payload
+- Poison buildup:
+  - Enchant MGEF keywords: `ERCF.MGEF.Buildup` + `ERCF.Status.Poison`
+  - magnitude = desired poison payload per hit
+- Bleed buildup:
+  - Enchant MGEF keywords: `ERCF.MGEF.Buildup` + `ERCF.Status.Bleed`
+  - magnitude = desired bleed payload per hit
+- (Optional) Extra elemental hit damage:
+  - Enchant MGEF keywords: `ERCF.MGEF.ElementalDamage` + `ERCF.DamageType.Elem.*`
+  - magnitude = elemental attack value for the ERCF pipeline (avoid stacking with vanilla DamageHealth on the same hit unless intentional)
 
-Ensure the test target (player) provides resistance and mitigation:
+Ensure the test target (player) wears armor that supplies:
 
-- Immunity resistance band:
-  - MGEF keywords: `ERCF.MGEF.ResBand` + `ERCF.ResBand.Immunity`
-  - magnitude = `ResValue_band` (v1 pacing divisor)
-- Robustness resistance band:
-  - MGEF keywords: `ERCF.MGEF.ResBand` + `ERCF.ResBand.Robustness`
-  - magnitude = `ResValue_band`
-- Magic mitigation (so Poison proc damage hits the pipeline):
-  - MGEF keywords: `ERCF.MGEF.Defense` + `ERCF.DamageType.Elem.Magic` (+ optional absorption keywords `ERCF.MGEF.Absorption`)
-- Standard mitigation (so Bleed proc damage hits the pipeline):
-  - MGEF keywords: `ERCF.MGEF.Defense` + `ERCF.DamageType.Phys.Standard` (+ optional absorption keywords `ERCF.MGEF.Absorption`)
+- **Physical mitigation:** armor rating on `TESObjectARMO` + optional `ERCF.DamageType.Phys.*` keywords on each armor piece to steer how rating splits across Standard/Strike/Slash/Pierce.
+- **Elemental mitigation:** enchantments on worn armor/jewelry with `ERCF.MGEF.Defense` / `ERCF.MGEF.Absorption` + `ERCF.DamageType.Elem.*`.
+- **Status resist (buildup pacing):** enchantments on worn items with `ERCF.MGEF.ResBand` + `ERCF.ResBand.Immunity` / `ERCF.ResBand.Robustness`.
+
+Proc damage still uses the same mitigation scan (armor rating → physical defense; armor enchants → elemental defense/absorption).
 
 ### B. Logs to watch
 

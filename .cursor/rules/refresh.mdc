@@ -1,0 +1,89 @@
+---
+description: "Skyrim SE / SKSE native plugin CTD and memory-corruption workflow: systematic crash root-cause analysis (CrashLogger/Trainwreck/SKSE logs, minidumps, x64dbg, AddressLib IDs, CommonLibSSE hooks/trampolines), assembly-level RCA before patching, remediation, verification, and zero-trust self-audit. Use when debugging access violations, bad hooks, register/stack corruption, or engine/plugin crashes—not for everyday feature work."
+alwaysApply: false
+---
+{A concise but complete description of the CTD (Crash to Desktop), memory corruption, or logic failure. Include the exception code (e.g., c0000005), crashing offset, RIP register state, and the sequence of in-game events leading to the failure.}
+
+---
+
+## **Mission Briefing: CTD Root Cause Analysis & Memory Remediation Protocol**
+
+Previous surface-level attempts (e.g., checking Papyrus logs, guessing load order issues) have failed. Standard procedures are suspended. You will initiate a **deep memory diagnostic protocol.**
+
+Your approach must be systematic, assembly-based, and relentlessly focused on identifying and fixing the **absolute root cause** in the engine or plugin logic. Patching symptoms (like blindly NOPing an instruction to avoid a crash) is a critical failure.
+
+---
+
+## **Phase 0: Reconnaissance & Memory Baseline (Static/Read-Only)**
+
+-   **Directive:** Perform a non-destructive scan of the crash logs (CrashLogger/Trainwreck), SKSE logs, IDA/Ghidra databases, and CommonLibSSE headers. Establish a high-fidelity baseline of the execution state at the time of the exception.
+-   **Output:** Produce a concise digest (≤ 200 lines) of your findings, including the call stack, register dump, and relevant Address Library IDs.
+-   **Constraint:** **No code mutation, hooking, or recompilation is permitted during this phase.**
+
+---
+
+## **Phase 1: Isolate the Anomaly (Dynamic)**
+
+-   **Directive:** Create a **minimal, reproducible execution path** that reliably and predictably triggers the memory violation or bug.
+-   **Actions:**
+    1.  **Define Correctness:** State the expected engine behavior (e.g., "The `ExtraDataList` should correctly return a valid `BSExtraData*` or null").
+    2.  **Create a Trigger:** Formulate a precise in-game sequence, console command, or Papyrus script to force the execution path.
+    3.  **Attach & Break:** Attach x64dbg/Cheat Engine. Set a hardware or software breakpoint directly on the suspected offset or VTable call.
+-   **Constraint:** You will not write a single line of C++ or xbyak assembly until you can trap the failure in a debugger on command.
+
+---
+
+## **Phase 2: Root Cause Analysis (RCA)**
+
+-   **Directive:** Methodically step through the assembly to find the definitive root cause of the crash or logic failure.
+-   **Evidence-Gathering Protocol:**
+    1.  **Formulate a Hypothesis:** State a testable theory at the memory/register level (e.g., "Hypothesis: The hook clobbers the `RBX` register, which the caller later uses as a pointer to `ActorState`.").
+    2.  **Devise an Experiment:** Step through the trampoline/engine code in x64dbg. Watch the register allocations and memory dereferences.
+    3.  **Execute and Conclude:** Record the register state before and after the failure point. Prove or disprove the hypothesis.
+-   **Anti-Patterns (Forbidden Actions):**
+    -   **FORBIDDEN:** Applying a hook/patch without a confirmed assembly-level root cause.
+    -   **FORBIDDEN:** Blindly NOPing instructions or changing branch conditions (`JE` to `JNE`) without understanding the engine's intended logic.
+    -   **FORBIDDEN:** Adding a null check in C++ without verifying if the engine *expects* the pointer to be null in that specific state.
+
+---
+
+## **Phase 3: Remediation (Patch/Hook)**
+
+-   **Directive:** Design and implement a precise, minimal C++ hook (using CommonLibSSE/SKSE trampolines) that durably patches the root cause while maintaining engine stability.
+-   **Core Protocols in Effect:**
+    -   **Disassembly Verification:** For every patch applied, you must verify the byte allocation (e.g., ensuring a 5-byte JMP fits without splitting instructions).
+    -   **Calling Convention Strictness:** Adhere strictly to x64 `__fastcall`. Manage the shadow space and preserve non-volatile registers.
+    -   **System-Wide Ownership:** If patching a base class VTable (e.g., `TESForm`), you are **MANDATED** to verify the fix does not break inherited classes (e.g., `TESObjectWEAP`, `TESNPC`).
+
+---
+
+## **Phase 4: Verification & Regression Guard**
+
+-   **Directive:** Prove the DLL patch resolves the issue without corrupting memory elsewhere.
+-   **Verification Steps:**
+    1.  **Confirm the Fix:** Re-run the specific trigger from Phase 1. The breakpoint should pass safely, or the crash must not occur.
+    2.  **Run Quality Gates:** Check `skse64.log` for initialization errors. Perform cell transitions and save/load cycles to ensure no heap corruption or memory leaks were introduced.
+    3.  **Autonomous Correction:** If MSBuild/CMake fails, or the game CTDs in a new location, autonomously analyze the new minidump and resolve it.
+
+---
+
+## **Phase 5: Mandatory Zero-Trust Self-Audit**
+
+-   **Directive:** Your C++ compilation is complete, but your work is **NOT DONE.** Conduct a skeptical, zero-trust audit of your hook.
+-   **Audit Protocol:**
+    1.  **Re-verify Memory Layout:** Disassemble your injected trampoline in x64dbg. Ensure no relative jumps (`REL32`) are calculating to the wrong destination due to memory allocation distances.
+    2.  **Hunt for Stack Imbalances:** Explicitly verify that `RSP` is identical before your hook execution and after it returns. An imbalanced stack guarantees a delayed CTD.
+
+---
+
+## **Phase 6: Final Report & Verdict**
+
+-   **Directive:** Conclude your mission with a structured "After-Action Patch Report."
+-   **Report Structure:**
+    -   **Root Cause:** A definitive statement of the assembly/logic failure, supported by the specific offset and register state.
+    -   **Remediation:** Exact details of the C++ hook (AddressLib ID, offset, hook type, bytes written).
+    -   **Verification Evidence:** Proof of stable execution (e.g., successful build, clean SKSE log, stable stack frame).
+    -   **Final Verdict:** Conclude with one of the two following statements, exactly as written:
+        -   `"Self-Audit Complete. Memory layout verified. Root cause neutralized and execution flow restored. No stack or register regressions identified. Mission accomplished."`
+        -   `"Self-Audit Complete. [CTD/MEM_CORRUPT] FOUND during audit. Halting work. [Describe register failure/stack imbalance and recommend immediate dynamic analysis]."`
+-   **Constraint:** Maintain an inline tracking ledger using `[PASS]` / `[WARN]` / `[WIP]` markers throughout the process. Do not use emojis.

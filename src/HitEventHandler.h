@@ -1,14 +1,18 @@
 #pragma once
 
-#include <mutex>
-#include <unordered_map>
-
 #include "RE/T/TESHitEvent.h"
+
+#include "StatusEffectManager.h"
 
 namespace ERCF
 {
 	namespace Runtime
 	{
+		// Evaluated ERCF status meters for the player (decay on Actor::Update). For Prisma HUD polling between hits.
+		[[nodiscard]] bool TryGetPlayerMetersHudSnapshot(StatusEffects::PlayerMetersHudSnapshot& a_out);
+
+		[[nodiscard]] bool TryGetPlayerMeterSnapshotForHud(float& poisonOut, float& bleedOut);
+
 		class HitEventHandler : public RE::BSTEventSink<RE::TESHitEvent>
 		{
 		public:

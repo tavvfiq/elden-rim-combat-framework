@@ -5,6 +5,12 @@
 #
 # Any missing/invalid values fall back to the defaults below.
 
+# Strict override mode (proof stage):
+# When enabled, ERCF suppresses vanilla HP damage on qualifying melee hits and applies its own HP delta once.
+override_mode_strict = false
+# Logs each suppressed/apply event to ERCF.log (noisy).
+override_debug_log = false
+
 # Defense curve constant used by:
 # PostDefense_T = ATK_T^2 / (ATK_T + k_defense * Defense_T)
 k_defense = 1.0
@@ -20,7 +26,69 @@ damage_floor_min = 0.0
 
 # Status meter decay:
 # - meter holds for status_decay_delay_seconds after last buildup
-# - then decays by meter *= exp(-status_decay_rate * dt)
+# - then universal linear drain: meter -= status_decay_rate * dt (buildup points per real-time second; default -5/s)
+# Set status_meter_decay_enabled = false to freeze meters (buildup testing; no time-based drain).
+status_meter_decay_enabled = true
 status_decay_delay_seconds = 0.75
-status_decay_rate = 4.0
+status_decay_rate = 5.0
+# Minimum seconds between decay steps per actor (Actor::Update hook; min 0.05). Only actors with active ERCF meters.
+status_decay_tick_interval_seconds = 2.0
+
+# Worn armor rating → physical flat defense (per-piece, split by ERCF phys keywords on ARMO).
+armor_rating_defense_scale = 0.01
+
+# Scales ERCF.MGEF.ElementalDamage magnitudes before applying extra elemental hit damage.
+elemental_enchant_damage_scale = 1.0
+
+# --- Damage-type matchup (taken multiplier after Defense→Absorption) ---
+# Each worn ARMO adds its GetArmorRating() to heavy / light / clothing (BOD2 armor type).
+# Per damage type, the target's multiplier is a rating-weighted blend of the three rows.
+# Naked (no armor rating) uses the clothing_* row only.
+# Values > 1.0 = takes more damage of that type; < 1.0 = takes less.
+# Optional: stack ERCF.MGEF.TakenMult + ERCF.DamageType.* on the target (magnitude multiplies further).
+# Min must be >= 0 (negative values would heal instead of damage).
+
+matchup_taken_mult_min = 0.05
+matchup_taken_mult_max = 3.0
+
+# Heavy armor profile (defaults tuned for “slash weak vs plate”, “magic slightly strong vs heavy”).
+matchup_heavy_standard = 1.0
+matchup_heavy_strike = 1.0
+matchup_heavy_slash = 0.72
+matchup_heavy_pierce = 0.92
+matchup_heavy_magic = 1.12
+matchup_heavy_fire = 1.0
+matchup_heavy_lightning = 1.05
+matchup_heavy_holy = 1.0
+
+matchup_light_standard = 1.0
+matchup_light_strike = 0.98
+matchup_light_slash = 1.1
+matchup_light_pierce = 1.12
+matchup_light_magic = 0.94
+matchup_light_fire = 1.0
+matchup_light_lightning = 1.0
+matchup_light_holy = 1.0
+
+matchup_clothing_standard = 1.0
+matchup_clothing_strike = 0.92
+matchup_clothing_slash = 1.15
+matchup_clothing_pierce = 1.1
+matchup_clothing_magic = 1.0
+matchup_clothing_fire = 1.08
+matchup_clothing_lightning = 1.05
+matchup_clothing_holy = 1.0
+
+# Set true to log detailed hit processing to ERCF.log (noisy in combat).
+# Includes a magicTrace line: wEntry / wEnchant (hitDataWeaponFormEITM_fallback = EITM-only path),
+# hitSpellExtra, vanillaDamagingHit, and flags (usedFallbackEITM, hitWeapNoInvEntry, INCONSISTENT_*).
+debug_hit_events = false
+# Log each status meter decay tick (target FormID, slot name, before/after, decay window seconds). Very noisy in combat.
+debug_status_decay = false
+
+# Status meters + proc banner (PrismaUI / WebView2). Default off. Requires PrismaUI.dll.
+# CreateView runs on kDataLoaded (same idea as Souls Style Looting). Throttling is fixed in code.
+enable_prisma_hud = false
+# Seconds between background meter polls (decay on the bar, proc-banner expiry). Hit buildup still updates immediately.
+prisma_hud_poll_interval_seconds = 0.5
 

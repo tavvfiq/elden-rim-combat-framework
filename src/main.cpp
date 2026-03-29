@@ -2,10 +2,12 @@
 
 #include "Log.h"
 #include "Messaging.h"
-#include "Proc.h"
 #include "Config.h"
+#include "ERLSIntegration.h"
 #include "HitEventHandler.h"
 #include "PrismaUIMeters.h"
+#include "OverrideDamageHook.h"
+#include "StatusEffectManager.h"
 
 namespace
 {
@@ -14,27 +16,39 @@ namespace
 		if (!a_msg) {
 			return;
 		}
+		if (a_msg->type == ERCF::kPrismaHudBuildupRefreshMessageType) {
+			ERCF::Prisma::OnPrismaHudBuildupMessaging();
+			return;
+		}
 		if (a_msg->type != ERCF::kStatusProcMessageType) {
 			return;
 		}
-		if (a_msg->dataLen < sizeof(ERCF::StatusProcMessage) || !a_msg->data) {
-			ERCFLog::Line("ERCF: StatusProc message invalid payload (size/data)");
+		if (a_msg->dataLen < sizeof(ERCF::StatusProcBatchMessage) || !a_msg->data) {
+			ERCFLog::Line("ERCF: StatusProc batch invalid payload (size/data)");
 			return;
 		}
 
-		auto* payload = static_cast<ERCF::StatusProcMessage*>(a_msg->data);
-		ERCFLog::LineF(
-			"ERCF: StatusProc received (attacker=%u target=%u status=%u band=%u meter=%.3f payload=%.3f)",
-			payload->attackerFormId,
-			payload->targetFormId,
-			payload->statusId,
-			payload->band,
-			payload->meterBeforePop,
-			payload->payloadAtPop
-		);
+		auto* batch = static_cast<ERCF::StatusProcBatchMessage*>(a_msg->data);
+		if (batch->count == 0 || batch->count > ERCF::kStatusProcBatchMaxEntries) {
+			ERCFLog::Line("ERCF: StatusProc batch invalid count");
+			return;
+		}
 
-		// Apply the numeric proc effects for Poison/Bleed.
-		ERCF::Proc::ApplyStatusProc(*payload);
+		for (std::uint32_t i = 0; i < batch->count; ++i) {
+			const auto& payload = batch->entries[i];
+			ERCFLog::LineF(
+				"ERCF: StatusProc received [%u/%u] (attacker=%u target=%u status=%u band=%u meter=%.3f payload=%.3f)",
+				i + 1,
+				batch->count,
+				payload.attackerFormId,
+				payload.targetFormId,
+				payload.statusId,
+				payload.band,
+				payload.meterBeforePop,
+				payload.payloadAtPop);
+			// Procs are applied inside StatusEffectManager before this batch is emitted; avoid double-apply.
+			// External listeners that need gameplay effects should call ERCF::StatusEffects::ApplyStatusProcMessage.
+		}
 	}
 
 	void OnSkseLifecycleMessage(SKSE::MessagingInterface::Message* a_msg)
@@ -46,8 +60,24 @@ namespace
 		case SKSE::MessagingInterface::kDataLoaded:
 			ERCFLog::Line("ERCF: kDataLoaded");
 			ERCF::Config::Load();
+			ERCF::ERLS::Init();
+			ERCF::Override::Install();
 			ERCF::Runtime::HitEventHandler::Register();
+			ERCF::StatusEffects::InstallActorDecayHook();
 			ERCF::Prisma::Init();
+			// Do not start SKSE task polling here — title menu + Prisma can deadlock/freeze if we hammer tasks.
+			// Polling starts after a session exists (kPostLoadGame / kNewGame).
+			break;
+		case SKSE::MessagingInterface::kPostLoadGame:
+			ERCFLog::Line("ERCF: kPostLoadGame");
+			// StartPeriodicHudRefresh synchronously from the messaging callback hard-freezes on some setups;
+			// defer onto the SKSE game thread (same work, safe timing).
+			ERCF::Prisma::QueueStartPeriodicHudRefresh();
+			break;
+		case SKSE::MessagingInterface::kNewGame:
+			ERCFLog::Line("ERCF: kNewGame");
+			// Safety: avoid auto-starting Prisma on New Game path (observed freeze-prone).
+			// HUD can still be started later through safer runtime paths.
 			break;
 		default:
 			break;
@@ -72,8 +102,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 		ERCFLog::Line("ERCF: failed to register StatusProc listener");
 	}
 
-	// Receive SKSE lifecycle messages to initialize our state on kDataLoaded.
-	if (!messaging->RegisterListener("SKSE", OnSkseLifecycleMessage)) {
+	// Receive SKSE lifecycle messages (kDataLoaded/kPostLoadGame/kNewGame).
+	// Use no-sender overload for broad compatibility across SKSE setups.
+	if (!messaging->RegisterListener(OnSkseLifecycleMessage)) {
 		ERCFLog::Line("ERCF: failed to register SKSE lifecycle listener");
 	}
 

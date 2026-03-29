@@ -37,8 +37,15 @@ namespace
 		{
 			float m = 50.0f;
 			double dt = 0.1;
-			float out = ERCF::Math::DecayMeter(m, dt, /*timeSinceLastBuildup*/ 0.1, /*decayDelay*/ 0.75, /*decayRate*/ 4.0);
+			float out = ERCF::Math::DecayMeter(m, dt, /*timeSinceLastBuildup*/ 0.1, /*decayDelay*/ 0.75, /*rate pts/s*/ 5.0);
 			assert(std::abs(out - m) < 0.0001f);
+		}
+
+		// Linear drain after hold: 5 points per second for 1s in decay window -> 50 -> 45.
+		{
+			float m = 50.0f;
+			float out = ERCF::Math::DecayMeter(m, 1.0, /*timeSinceLastBuildup*/ 1.0, /*decayDelay*/ 0.75, 5.0);
+			assert(std::abs(out - 45.0f) < 0.0001f);
 		}
 	}
 

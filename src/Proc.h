@@ -1,13 +1,17 @@
 #pragma once
 
 #include "Messaging.h"
+#include <RE/T/TESForm.h>
 
 namespace ERCF
 {
 	namespace Proc
 	{
-		// Applies Poison/Bleed proc numeric effects when a public ERCF.StatusProc message arrives.
-		// v1 behavior: treat `payloadAtPop` as flat HP damage and apply it immediately.
+		// Damage-taken multiplier from active Frostbite debuff (30s). Defaults to 1.0.
+		[[nodiscard]] float GetDamageTakenMultiplier(RE::FormID a_target);
+
+		// Forwards to StatusEffects::ApplyStatusProcMessage (same requirement rules). ERCF applies procs
+		// internally before emitting the public batch; use this for external tools re-playing messages.
 		void ApplyStatusProc(const StatusProcMessage& a_msg);
 	}
 }

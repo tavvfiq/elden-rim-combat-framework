@@ -1,0 +1,69 @@
+---
+description: "Post-session retrospective and rule hardening for this Skyrim SE / SKSE / CommonLibSSE plugin repo: audit recent execution for stable patterns vs CTD vectors, distill universal engineering rules, patch project doctrine (e.g. `.cursor/rules`, `AGENTS.md`, `.cursorrules`, `docs/RE_Notes.md`), and emit the structured Audit Report. Use when the user asks to debrief, capture lessons learned, harden or update project rules after debugging/RE work, or run a meta-audit—not for normal feature work or first-pass implementation."
+alwaysApply: false
+---
+
+# DIRECTIVE: Post-Execution Audit & Rule Hardening
+
+[STATUS] Execution cycle complete. Initiating internal meta-audit.
+**Objective:** Extract durable C++/RE patterns from recent execution. Patch internal SKSE/CommonLibSSE rule files. Ensure future stability.
+
+---
+
+## **Phase 0: Execution Audit (Internal Memory)**
+
+-   **Directive:** Scan session history for logic flows, CTD vectors, and hook stability.
+-   **Output:** Internal buffer only. Synthesize into bulleted metrics.
+-   **Focus Areas:**
+    -   `[STABLE]`: Successful memory patterns, efficient C++20 implementations, verified offsets.
+    -   `[CTD/FAIL]`: Root causes of crashes (e.g., register clobbering, race conditions, stack imbalances). Identify the specific user correction that resolved it.
+    -   `[PATTERN]`: Reusable Assembly or CommonLibSSE architectural insights.
+
+---
+
+## **Phase 1: Heuristic Distillation**
+
+-   **Directive:** Abstract session insights into permanent, immutable engineering rules.
+-   **Validation Gates (Must Pass All):**
+    -   ✅ **Universal:** Applies to the Creation Engine or CommonLibSSE broadly, not a one-off hardcoded fix.
+    -   ✅ **Abstracted:** Defines a strict standard (e.g., "Always align stack to 16 bytes before calling scaleform UI functions").
+    -   ✅ **High-Impact:** Prevents engine CTDs, memory leaks, or significantly reduces RE friction.
+-   **Classification:**
+    -   `Global Engine Rules`: Fundamental Creation Engine truths.
+    -   `Plugin Rules`: Constraints specific to the current DLL's architecture or build system.
+
+---
+
+## **Phase 2: Rule Injection**
+
+-   **Directive:** Patch the physical doctrine files (`docs/RE_Notes.md`, `.cursorrules`, `AGENTS.md`).
+-   **Protocol:**
+    1.  **Locate Targets:** Prioritize project-specific RE notes, fallback to global C++ rules.
+    2.  **Scan:** Read the target file to map its structure.
+    3.  **Patch:** Integrate the new rule. Merge with existing similar rules to avoid redundancy. Maintain rigid, concise formatting. Do not append blindly.
+
+---
+
+## **Phase 3: Final Output Dump**
+
+-   **Directive:** Output the final audit log using the exact structure below.
+-   **Format:**
+    ```text
+    **Audit Report**
+
+    - **Rule Patches:**
+      - `Target`: [File path]
+      - `Diff`:
+        ```diff
+        + [Exact rule added/modified]
+        ```
+      - *(Fallback if no changes):* `[NO_CHANGE] No durable engine patterns discovered.`
+    
+    - **Session Heuristics:**
+      - [Bullet 1: Extracted insight]
+      - [Bullet 2: Extracted insight]
+    ```
+
+---
+
+> **MANDATE:** Evolution is mandatory. Harden the codebase logic. Execute audit with machine precision. Begin.
