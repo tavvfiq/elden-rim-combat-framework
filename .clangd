@@ -1,0 +1,18 @@
+# Compilation database: run from repo root (after config or target changes):
+#   xmake project -k compile_commands
+# `compile_commands.json` is gitignored by default; generate it locally for clangd.
+#
+# If clangd still fails on MSVC system includes, add to Cursor/VS Code settings
+# ("clangd.arguments"):
+#   --query-driver=C:/Program Files/Microsoft Visual Studio/**/Hostx64/x64/cl.exe
+
+CompileFlags:
+  # PCH driver flags are MSVC-specific; sources already #include "pch.h".
+  Remove:
+    - /Yu*
+    - /Yc*
+    - /FI*
+    - /Fp*
+
+Index:
+  Background: Build

@@ -34,3 +34,5 @@ Thumbs.db
 # Local scratch / archives
 *.zip
 *.7z
+
+.cache

@@ -25,12 +25,12 @@ namespace ERCF::ERAS
 
 		auto* api = ERAS_API::RequestPluginAPI(ERAS_API::InterfaceVersion::V1);
 		if (!api || (!api->getPlayerStats && !api->getStatsSnapshotForActor)) {
-			ERCFLog::Line("ERCF: ERAS not found (eras.dll missing?)");
+			LOG_WARN("ERCF: ERAS not found (eras.dll missing?)");
 			return;
 		}
 
 		s_api.store(api, std::memory_order_release);
-		ERCFLog::Line("ERCF: ERAS API acquired (IERAS1)");
+		LOG_INFO("ERCF: ERAS API acquired (IERAS1)");
 	}
 
 	bool IsAvailable()

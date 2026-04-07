@@ -8,7 +8,7 @@
 # Strict override mode (proof stage):
 # When enabled, ERCF suppresses vanilla HP damage on qualifying melee hits and applies its own HP delta once.
 override_mode_strict = false
-# Logs each suppressed/apply event to ERCF.log (noisy).
+# Logs each suppressed/apply event to the SKSE plugin log (noisy).
 override_debug_log = false
 
 # Defense curve constant used by:
@@ -40,6 +40,21 @@ armor_rating_defense_scale = 0.01
 # Scales ERCF.MGEF.ElementalDamage magnitudes before applying extra elemental hit damage.
 elemental_enchant_damage_scale = 1.0
 
+# Spell missile strict-override (spell_staff_damage.md): multiplies ERCF elemental spell bases before ERAS/L1/L2.
+# Tier score (material / spell tier / staff gold) is clamped to [spell_catalyst_base_min, spell_catalyst_base_max] → 0..1 lerp.
+# Hands: FinalMag *= 1 + spell_innate_coef * StatSat (INT). Raise innate if hand spells feel weak after L1/L2.
+# Staff: FinalMag *= handMult * lerp(premium_min, premium_max, tier01) * (1 + spell_staff_enchant_k * scaleCoef * StatSat).
+# scaleCoef from staff enchant ERCF.WeaponAttributeScaling.INT or .FTH (percent→decimal), else spell_fallback_scale_coef.
+spell_catalyst_base_min = 1.0
+spell_catalyst_base_max = 6.0
+spell_innate_coef = 3.0
+# No HitData weapon enchant (typical hand missiles): add this INT/FTH scaling coeff to elemental bonus damage.
+spell_hand_intrinsic_attr_coef = 1.35
+spell_fallback_scale_coef = 0.9
+spell_staff_tier_premium_min = 1.05
+spell_staff_tier_premium_max = 1.15
+spell_staff_enchant_k = 0.25
+
 # --- Damage-type matchup (taken multiplier after Defense→Absorption) ---
 # Each worn ARMO adds its GetArmorRating() to heavy / light / clothing (BOD2 armor type).
 # Per damage type, the target's multiplier is a rating-weighted blend of the three rows.
@@ -58,8 +73,9 @@ matchup_heavy_slash = 0.72
 matchup_heavy_pierce = 0.92
 matchup_heavy_magic = 1.12
 matchup_heavy_fire = 1.0
+matchup_heavy_frost = 1.0
+matchup_heavy_poison = 1.0
 matchup_heavy_lightning = 1.05
-matchup_heavy_holy = 1.0
 
 matchup_light_standard = 1.0
 matchup_light_strike = 0.98
@@ -67,8 +83,9 @@ matchup_light_slash = 1.1
 matchup_light_pierce = 1.12
 matchup_light_magic = 0.94
 matchup_light_fire = 1.0
+matchup_light_frost = 1.0
+matchup_light_poison = 1.0
 matchup_light_lightning = 1.0
-matchup_light_holy = 1.0
 
 matchup_clothing_standard = 1.0
 matchup_clothing_strike = 0.92
@@ -76,13 +93,17 @@ matchup_clothing_slash = 1.15
 matchup_clothing_pierce = 1.1
 matchup_clothing_magic = 1.0
 matchup_clothing_fire = 1.08
+matchup_clothing_frost = 1.0
+matchup_clothing_poison = 1.0
 matchup_clothing_lightning = 1.05
-matchup_clothing_holy = 1.0
 
 # Set true to log detailed hit processing to ERCF.log (noisy in combat).
 # Includes a magicTrace line: wEntry / wEnchant (hitDataWeaponFormEITM_fallback = EITM-only path),
 # hitSpellExtra, vanillaDamagingHit, and flags (usedFallbackEITM, hitWeapNoInvEntry, INCONSISTENT_*).
 debug_hit_events = false
+# Plugin log level (spdlog): off | critical | error | warn | info | debug | trace (aliases: err, warning).
+# Applies to the default SKSE/spdlog logger for this DLL (under My Games/<Skyrim>/SKSE/, same file as CommonLib init). debug/trace show LOG_DEBUG / LOG_TRACE output.
+log_level = "info"
 # Log each status meter decay tick (target FormID, slot name, before/after, decay window seconds). Very noisy in combat.
 debug_status_decay = false
 

@@ -3,6 +3,7 @@
 #include "EspRouting.h"
 
 #include "Config.h"
+#include "Log.h"
 
 #include <RE/B/BSContainer.h>
 #include <RE/I/InventoryChanges.h>
@@ -20,6 +21,11 @@ namespace ERCF
 			constexpr const char* KW_MGEF_RESBAND = "ERCF.MGEF.ResBand";
 			constexpr const char* KW_MGEF_ELEMENTAL_DAMAGE = "ERCF.MGEF.ElementalDamage";
 			constexpr const char* KW_MGEF_TAKEN_MULT = "ERCF.MGEF.TakenMult";
+			constexpr const char* KW_WAS_STR = "ERCF.WeaponAttributeScaling.STR";
+			constexpr const char* KW_WAS_DEX = "ERCF.WeaponAttributeScaling.DEX";
+			constexpr const char* KW_WAS_INT = "ERCF.WeaponAttributeScaling.INT";
+			constexpr const char* KW_WAS_FTH = "ERCF.WeaponAttributeScaling.FTH";
+			constexpr const char* KW_WAS_ARC = "ERCF.WeaponAttributeScaling.ARC";
 
 			constexpr const char* KW_STATUS_POISON = "ERCF.Status.Poison";
 			constexpr const char* KW_STATUS_BLEED = "ERCF.Status.Bleed";
@@ -39,8 +45,11 @@ namespace ERCF
 			constexpr const char* KW_DAMAGE_PIERCE = "ERCF.DamageType.Phys.Pierce";
 			constexpr const char* KW_DAMAGE_MAGIC = "ERCF.DamageType.Elem.Magic";
 			constexpr const char* KW_DAMAGE_FIRE = "ERCF.DamageType.Elem.Fire";
+			constexpr const char* KW_DAMAGE_FROST = "ERCF.DamageType.Elem.Frost";
+			constexpr const char* KW_DAMAGE_POISON = "ERCF.DamageType.Elem.Poison";
 			constexpr const char* KW_DAMAGE_LIGHTNING = "ERCF.DamageType.Elem.Lightning";
-			constexpr const char* KW_DAMAGE_HOLY = "ERCF.DamageType.Elem.Holy";
+			// Legacy authoring keyword: route to Magic bucket (requirement.md uses Magic for generic / sun split).
+			constexpr const char* KW_DAMAGE_HOLY_LEGACY = "ERCF.DamageType.Elem.Holy";
 
 			[[nodiscard]] bool HasEffectKW(const RE::EffectSetting* a_setting, const char* a_kw)
 			{
@@ -59,16 +68,35 @@ namespace ERCF
 				if (HasEffectKW(a_setting, KW_DAMAGE_PIERCE)) return DamageTypeId::Pierce;
 				if (HasEffectKW(a_setting, KW_DAMAGE_MAGIC)) return DamageTypeId::Magic;
 				if (HasEffectKW(a_setting, KW_DAMAGE_FIRE)) return DamageTypeId::Fire;
+				if (HasEffectKW(a_setting, KW_DAMAGE_FROST)) return DamageTypeId::Frost;
+				if (HasEffectKW(a_setting, KW_DAMAGE_POISON)) return DamageTypeId::Poison;
 				if (HasEffectKW(a_setting, KW_DAMAGE_LIGHTNING)) return DamageTypeId::Lightning;
-				if (HasEffectKW(a_setting, KW_DAMAGE_HOLY)) return DamageTypeId::Holy;
+				if (HasEffectKW(a_setting, KW_DAMAGE_HOLY_LEGACY)) return DamageTypeId::Magic;
 
 				return std::nullopt;
 			}
 
+			[[nodiscard]] const char* WeaponEnchantKindCstr(HitMagicTrace::WeaponEnchant a_k)
+			{
+				using W = HitMagicTrace::WeaponEnchant;
+				switch (a_k) {
+				case W::None:
+					return "none";
+				case W::InstanceOnEntry:
+					return "instance";
+				case W::BoundWeaponEITM:
+					return "bound_eitm";
+				case W::HitDataWeaponFormEITM:
+					return "weapon_form_eitm";
+				default:
+					return "?";
+				}
+			}
+
 			[[nodiscard]] bool IsElementalType(DamageTypeId a_id)
 			{
-				return a_id == DamageTypeId::Magic || a_id == DamageTypeId::Fire ||
-					a_id == DamageTypeId::Lightning || a_id == DamageTypeId::Holy;
+				return a_id == DamageTypeId::Magic || a_id == DamageTypeId::Fire || a_id == DamageTypeId::Frost ||
+					a_id == DamageTypeId::Poison || a_id == DamageTypeId::Lightning;
 			}
 
 			[[nodiscard]] bool IsPhysicalType(DamageTypeId a_id)
@@ -132,6 +160,45 @@ namespace ERCF
 				if (a_kwForm->HasKeywordString(KW_DAMAGE_PIERCE)) {
 					w[3] += 1.0f;
 					a_any = true;
+				}
+			}
+
+			void AccumulateWeaponAttributeScalingFromMagicItemImpl(
+				const RE::MagicItem* a_item,
+				Math::WeaponAttrScalingCoeffs& a_out)
+			{
+				if (!a_item) {
+					return;
+				}
+				for (auto* eff : a_item->effects) {
+					if (!eff) {
+						continue;
+					}
+					auto* setting = eff->baseEffect;
+					if (!setting) {
+						continue;
+					}
+					const float mag = eff->GetMagnitude();
+					if (!(mag > 0.0f)) {
+						continue;
+					}
+					// CK magnitude is percent of base (e.g. 160 = 160% → multiplier 1.60 for bonus formula).
+					const float coef = mag * 0.01f;
+					if (HasEffectKW(setting, KW_WAS_STR)) {
+						a_out.str += coef;
+					}
+					if (HasEffectKW(setting, KW_WAS_DEX)) {
+						a_out.dex += coef;
+					}
+					if (HasEffectKW(setting, KW_WAS_INT)) {
+						a_out.intl += coef;
+					}
+					if (HasEffectKW(setting, KW_WAS_FTH)) {
+						a_out.fth += coef;
+					}
+					if (HasEffectKW(setting, KW_WAS_ARC)) {
+						a_out.arc += coef;
+					}
 				}
 			}
 
@@ -463,6 +530,11 @@ namespace ERCF
 			}
 		}
 
+		void AccumulateWeaponAttributeScalingFromMagicItem(const RE::MagicItem* a_item, Math::WeaponAttrScalingCoeffs& a_out)
+		{
+			AccumulateWeaponAttributeScalingFromMagicItemImpl(a_item, a_out);
+		}
+
 		void ExtractHitSourceFromWeaponAndSpell(const RE::InventoryEntryData* a_weaponEntry, const RE::MagicItem* a_hitSpell,
 			StatusBuildupCoefficients& a_buildupOut, ElementalHitComponents& a_elementalOut,
 			const RE::TESObjectWEAP* a_weaponFormFallback, HitMagicTrace* a_trace)
@@ -661,6 +733,61 @@ namespace ERCF
 					nullptr;
 			}
 			return nullptr;
+		}
+
+		namespace
+		{
+			constexpr const char* kVanillaKwUndead = "ActorTypeUndead";
+			constexpr const char* kVanillaKwSilverWeap = "WeaponMaterialSilver";
+			constexpr const char* kVanillaKwSunDamage[] = { "DLC1SunDamage", "DLC1SunDamageUndead" };
+
+			[[nodiscard]] bool MagicItemHasAnySunKeyword(const RE::MagicItem* a_item)
+			{
+				if (!a_item) {
+					return false;
+				}
+				for (auto* eff : a_item->effects) {
+					if (!eff || !eff->baseEffect) {
+						continue;
+					}
+					for (const char* kw : kVanillaKwSunDamage) {
+						if (eff->baseEffect->HasKeywordString(kw)) {
+							return true;
+						}
+					}
+				}
+				return false;
+			}
+
+			// Placeholder until a config knob exists; requirement.md §2.2 cites the interaction only.
+			constexpr float kSilverVsUndeadPhysicalMult = 1.2f;
+		}
+
+		bool HitSourcesHaveSunDamageKeyword(const RE::MagicItem* hitSpell, const RE::MagicItem* weaponEnchant)
+		{
+			return MagicItemHasAnySunKeyword(hitSpell) || MagicItemHasAnySunKeyword(weaponEnchant);
+		}
+
+		float Layer2SunMagicScalar(const RE::Actor* victim, bool sourcesHaveSunKeyword)
+		{
+			if (!sourcesHaveSunKeyword || !victim) {
+				return 1.0f;
+			}
+			// RE::Actor::HasKeywordString is non-const in CommonLib.
+			return const_cast<RE::Actor*>(victim)->HasKeywordString(kVanillaKwUndead) ? 1.0f : 0.0f;
+		}
+
+		float Layer2SilverVsUndeadPhysicalScalar(const RE::Actor* victim, const RE::TESObjectWEAP* weapon)
+		{
+			if (!victim || !weapon ||
+				!const_cast<RE::Actor*>(victim)->HasKeywordString(kVanillaKwUndead)) {
+				return 1.0f;
+			}
+			const auto* kf = static_cast<const RE::BGSKeywordForm*>(weapon);
+			if (!kf || !kf->HasKeywordString(kVanillaKwSilverWeap)) {
+				return 1.0f;
+			}
+			return kSilverVsUndeadPhysicalMult;
 		}
 	}
 }

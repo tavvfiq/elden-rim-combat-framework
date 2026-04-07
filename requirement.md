@@ -12,130 +12,130 @@ Design intent:
 - Standard: neutral vs most armor types
 - Strike: strong vs heavy armor and hard-skin creatures
 - Slash: strong vs flesh, cloth, and light armor
-- Pierce: good armor penetration
+- Pierce: good armor penetration (extra 30% damage for layer 1 when the enemy is attacking/sprinting/or there is opening)
 
 ## 2) Two-Layer HP Processing
 
-HP damage always passes through two layers.
+This section describes what the code does today on the **strict override** path (`ComputeRequirementDamageForVictim` in `OverrideDamageHook.cpp`, using `CombatMath.h` for Layer 1 and `EspRouting` for Layer 2 absorption). Other code paths (for example extra elemental HP on `TESHitEvent` when override is off) still use the older `PostDefense` / per-type `mitigation.defense[]` model from `CombatMath.h` and are not identical to the formulas below.
 
 ### 2.1 Layer 1 (Flat Defense)
 
-Layer 1 is global for player and NPC and is based on:
+**When ERAS is available** (`TryGetActorSnapshot` succeeds), strict override uses **`PlayerStatsSnapshot::defense`** (`DefenseSheet`) as the stat-derived L1 defense **per damage family**:
 
-- level
-- attributes (health, magicka)
-- armor rating
+- **Physical line:** `defense.physical`
+- **Elemental lines** (aligned with `DamageTypeId`): `defense.magic`, `defense.fire`, `defense.frost`, `defense.poison`, `defense.lightning`
 
-#### Base defense
+ERAS owns the curve; ERCF applies the same clamp to that core only (strict override does **not** add `ERCF.MGEF.Defense` flat values on Layer 1; those still affect non-strict paths where applicable).
+
+**When ERAS is not available**, ERCF synthesizes buckets with `Req_ComputeDefenseBucketsL1(level, maxHP, maxMP, armorRating)`:
+
+- **`physical`**: base + level increment + `0.1 * (maxHP / 10)` + `0.1 * armorRating`
+- **`elemental[5]`**: each slot = base + level increment + `0.1 * (maxMP / 10)` (shared formula across the five types; separate array slots).
+
+Fallback **inputs**: `Actor::GetLevel()`, **current** `kHealth` / `kMagicka`, `kDamageResist` as `armorRating` (not summed worn ARMO rating).
+
+#### Base defense (Req fallback only)
 
 `BaseDefense = 10 + (level + 78) / 2.483`
 
-#### Additional level increment (also applied)
+#### Level increment (piecewise, additive; Req fallback only)
 
-- level 1..71: `+0.40` defense per level
-- level 72..91: `+1.00` defense per level
-- level 92..160: `+0.21` defense per level
-- level 161..713: `+0.036` defense per level
+Implementation matches `Req_LevelIncrement`: uses `L = max(1, level)` and sums segments `(upper - lo) * slope` for each band:
 
-#### Attribute and armor contributions
+| Segment (exclusive of `lo`, inclusive of `upper`) | Slope |
+|---------------------------------------------------|-------|
+| above 1 up to 71                                  | 0.40  |
+| above 71 up to 91                                 | 1.00  |
+| above 91 up to 160                                | 0.21  |
+| above 160 up to 713                               | 0.036 |
 
-- Physical defense: `+0.1` per 10 health
-- Magical/elemental defense: `+0.1` per 10 magicka
-- Physical defense: `+0.1` per armor rating
+At level 1 the increment is 0.
 
-#### Layer 1 defense buckets
+#### Layer 1 defense buckets (strict override)
 
-- Physical subtypes (`Standard/Strike/Slash/Pierce`) are consolidated into one **physical** defense bucket in Layer 1.
-- Elemental uses per-type defense (`Fire/Frost/Poison/Lightning/Magic`).
+- **Physical:** `D` = ERAS `defense.physical` **or** Req `physical` bucket only.
+- **Elemental:** for each type `T`, `D = core(T)` where `core(T)` is the matching ERAS `DefenseSheet` field **or** the Req elemental slot (Magic … Lightning order).
 
 #### Layer 1 formula
 
-For each damage component:
+For raw damage `raw > 0` and defense `D ≥ 0`:
 
-`D_l1(component) = clamp(raw(component) - defense(component), 0.1 * raw(component), 0.9 * raw(component))`
+`D_l1 = clamp(raw - D, 0.1 * raw, 0.9 * raw)`
 
-Total Layer 1 output:
+`raw ≤ 0` yields `D_l1 = 0`.
 
-`D_l1_total = Σ D_l1(component)`
+Physical hits use `D = physical` (stat core only). Each elemental line uses `D = core(T)` as above.
+
+**Pierce (physical subtype, strict override):** if the weapon’s dominant physical type is Pierce, physical **raw** going into Layer 1 is multiplied by **1.3** when the **victim** is in any of: `Actor::IsAttacking()`, `ActorState::IsSprinting()`, `ActorState` stagger flag set, or knock state other than `kNormal` (opening / hit reaction windows — see `OverrideDamageHook.cpp`).
+
+Combined strict-override HP from the Req pipeline is a sum over one physical line (vanilla melee/projectile raw treated as that line today) plus each non-zero elemental line from `ExtractHitSourceFromWeaponAndSpell`.
 
 ### 2.2 Layer 2 (Multiplicative Mitigation)
 
-For each component:
+For each component after Layer 1:
 
-`D_l2(component) = D_l1(component) * (1 - N1) * (1 - N2) * (1 - N3) * ...`
+`D_l2 = D_l1 * Π_i (1 - N_i)`
 
-Where `N` is a mitigation percentage in decimal form from armor, amulet, ring, perk, race, etc.
+Each `N_i` is an **absorbed fraction** in `[0, 1]` (stored internally as decimal, e.g. 10% → `0.1`). Values are clamped to `[0, 1]` when applied. Sources are merged from:
 
-Important:
+- Worn armor **instance enchantments** and **active effects** on the target with `ERCF.MGEF.Absorption` plus an `ERCF.DamageType.*` keyword (`EspRouting`: `absorptionFractions[type]`).
 
-- Layer 2 for physical is subtype-specific:
-  - Slash damage uses slash mitigation bucket
-  - Strike damage uses strike mitigation bucket
-  - Pierce damage uses pierce mitigation bucket
-  - Standard damage uses standard mitigation bucket
-- Race resistances apply in Layer 2 for relevant elemental type.
-- Contextual type modifiers in Layer 2:
-  - Silver material bonus applies to all physical subtypes when target is undead.
-    - Source keyword: `WeaponMaterialSilver` (vanilla)
-    - Target keyword: `ActorTypeUndead` (vanilla)
-  - Sun damage is treated as a separate split component using `Magic` type.
-    - Source tags: `DLC1SunDamage` (general) or `DLC1SunDamageUndead`
-    - Non-undead target: apply 100% reduction in layer 2 (`* 0`)
-    - Undead target: no special reduction (`* 1`)
+**Physical (strict override):** the game’s hit supplies one physical raw amount; the plugin picks a **dominant physical subtype** from the weapon (`ResolveDominantPhysicalSubtype` / `WEAPON_TYPE` fallback). Layer 2 uses `absorptionFractions[subtype]` for that subtype only (Standard / Strike / Slash / Pierce).
 
+**Elemental:** each elemental type uses its own `absorptionFractions[type]`.
 
-Total HP damage after both layers:
+**Contextual modifiers** (after the product, still in the override combiner):
 
-`DamageHP = Σ D_l2(component)`
+- **Silver vs undead:** if the victim has `ActorTypeUndead` and the weapon has `WeaponMaterialSilver`, physical `D_l2` is multiplied by **1.2** (`Layer2SilverVsUndeadPhysicalScalar`).
+- **Sun (Dawnguard):** if the hit spell or weapon enchant has `DLC1SunDamage` or `DLC1SunDamageUndead` on any magic effect, the **Magic** elemental line’s `D_l2` is multiplied by **0** when the target is not undead, else **1** (`Layer2SunMagicScalar`).
 
-## 3) Worked Example (Level 75 Nord)
+**After Σ D_l2:** the total is multiplied by `Proc::GetDamageTakenMultiplier` (e.g. frostbite +incoming damage), then clamped to non-negative.
 
-Input:
+`DamageHP = max(0, (Σ D_l2) * takenMultiplier)`
+
+## 3) Worked Example (Level 75, strict-override inputs, **Req fallback**)
+
+Same numeric story as the **non-ERAS** branch of §2.1, using `Req_ComputeDefenseBucketsL1` (rounded). With ERAS, substitute the six `DefenseSheet` values instead of these derived numbers.
+
+Input (victim):
 
 - level: 75
-- HP: 720
-- SP: 100
-- MP: 130
-- armor rating: 100
+- maxHP: 720 (as fed into `Req_ComputeDefenseBucketsL1`)
+- maxMP: 130
+- armorRating: `100` (example: ERAS `defense.physical` or `kDamageResist` fallback)
 
-Derived defenses:
+Derived:
 
-- base defense: `10 + (75 + 78)/2.483 = 85.03`
-- defense from level increment: `(0.4 * 70) + (1 * 3) = 31`
-- extra physical from HP: `72 * 0.1 = 7.2`
-- extra physical from armor rating: `100 * 0.1 = 10`
-- extra elemental from MP: `13 * 0.1 = 1.2`
+- `BaseDefense = 10 + (75 + 78) / 2.483 ≈ 71.62`
+- level increment: `(71 - 1) * 0.40 + (75 - 71) * 1.00 = 28 + 4 = 32`
+- extra physical from HP: `0.1 * (720 / 10) = 7.2`
+- extra physical from armor: `0.1 * 100 = 10`
+- extra elemental from MP: `0.1 * (130 / 10) = 1.3`
 
-Final defense:
+**L1 buckets**
 
-- physical: `85 + 31 + 7.2 + 10 = 133.2`
-- fire: `85 + 31 + 1.2 = 117.2`
-- frost: `85 + 31 + 1.2 = 117.2`
-- poison: `85 + 31 + 1.2 = 117.2`
-- lightning: `85 + 31 + 1.2 = 117.2`
-- magical: `85 + 31 + 1.2 = 117.2`
+- `physical ≈ 71.62 + 32 + 7.2 + 10 = 120.82`
+- each of `elemental[Magic] … elemental[Lightning] ≈ 71.62 + 32 + 1.3 = 104.92`
 
-Layer-2 mitigation setup for example:
+Layer-2 setup for the example (absorption only):
 
-- slash mitigation: `10%`
-- fire mitigation: `20%`
+- slash: `10%` → `N = 0.1`
+- fire: `20%` → `N = 0.2`
 
-Cases:
+Cases (ignore silver/sun/frostbite mult for simplicity):
 
-1. `120` slash raw:
-   - Layer 1: `clamp(120 - 133.2, 12, 108) = 12`
-   - Layer 2: `12 * (1 - 0.1) = 10.8`
+1. **120** physical raw, treated as slash-dominant:
+   - L1: `clamp(120 - 120.82, 12, 108) = 12`
+   - L2: `12 * (1 - 0.1) = 10.8`
 
-2. `300` slash raw:
-   - Layer 1: `clamp(300 - 133.2, 30, 270) = 166.8`
-   - Layer 2: `166.8 * (1 - 0.1) = 150.12`
+2. **300** physical raw, slash-dominant:
+   - L1: `clamp(300 - 120.82, 30, 270) = 179.18`
+   - L2: `179.18 * (1 - 0.1) ≈ 161.26`
 
-3. Split hit `150` slash + `150` fire:
-   - Layer 1 slash: `150 - 133.2 = 16.8`
-   - Layer 1 fire: `150 - 117.2 = 32.8`
-   - Layer 2 total: `(16.8 * 0.9) + (32.8 * 0.8) = 41.36`
-
-Final damage values: `10.8`, `150.12`, `41.36`
+3. Split **150** physical (slash) + **150** fire (elemental line from enchant/spell):
+   - L1 physical: `clamp(150 - 120.82, 15, 135) = 29.18`
+   - L1 fire: `clamp(150 - 104.92, 15, 135) = 45.08`
+   - L2 total: `29.18 * 0.9 + 45.08 * 0.8 ≈ 62.33`
 
 ## 4) Status Effect Damage
 

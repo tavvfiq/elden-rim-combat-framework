@@ -24,7 +24,7 @@ namespace ERCF
 			try {
 				auto result = toml::try_parse(a_path.string().c_str());
 				if (!result.is_ok()) {
-					ERCFLog::Line("ERCF: toml parse failed for ercf.toml, using defaults");
+					LOG_WARN("ERCF: toml parse failed for ercf.toml, using defaults");
 					return;
 				}
 
@@ -58,11 +58,50 @@ namespace ERCF
 					toml::find_or<float>(tbl, "armor_rating_defense_scale", s_values.armor_rating_defense_scale);
 				s_values.elemental_enchant_damage_scale =
 					toml::find_or<float>(tbl, "elemental_enchant_damage_scale", s_values.elemental_enchant_damage_scale);
+				s_values.spell_catalyst_base_min =
+					toml::find_or<float>(tbl, "spell_catalyst_base_min", s_values.spell_catalyst_base_min);
+				s_values.spell_catalyst_base_max =
+					toml::find_or<float>(tbl, "spell_catalyst_base_max", s_values.spell_catalyst_base_max);
+				if (s_values.spell_catalyst_base_max < s_values.spell_catalyst_base_min) {
+					std::swap(s_values.spell_catalyst_base_min, s_values.spell_catalyst_base_max);
+				}
+				s_values.spell_innate_coef =
+					toml::find_or<float>(tbl, "spell_innate_coef", s_values.spell_innate_coef);
+				s_values.spell_hand_intrinsic_attr_coef = toml::find_or<float>(
+					tbl,
+					"spell_hand_intrinsic_attr_coef",
+					s_values.spell_hand_intrinsic_attr_coef);
+				s_values.spell_hand_intrinsic_attr_coef =
+					(std::max)(0.0f, s_values.spell_hand_intrinsic_attr_coef);
+				s_values.spell_fallback_scale_coef =
+					toml::find_or<float>(tbl, "spell_fallback_scale_coef", s_values.spell_fallback_scale_coef);
+				s_values.spell_staff_tier_premium_min = toml::find_or<float>(
+					tbl,
+					"spell_staff_tier_premium_min",
+					s_values.spell_staff_tier_premium_min);
+				s_values.spell_staff_tier_premium_max = toml::find_or<float>(
+					tbl,
+					"spell_staff_tier_premium_max",
+					s_values.spell_staff_tier_premium_max);
+				if (s_values.spell_staff_tier_premium_max < s_values.spell_staff_tier_premium_min) {
+					std::swap(s_values.spell_staff_tier_premium_min, s_values.spell_staff_tier_premium_max);
+				}
+				s_values.spell_staff_enchant_k =
+					toml::find_or<float>(tbl, "spell_staff_enchant_k", s_values.spell_staff_enchant_k);
+				s_values.spell_staff_enchant_k = (std::max)(0.0f, s_values.spell_staff_enchant_k);
 
 				static const char* matchupSuf[] = {
-					"standard", "strike", "slash", "pierce", "magic", "fire", "lightning", "holy"};
+					"standard",
+					"strike",
+					"slash",
+					"pierce",
+					"magic",
+					"fire",
+					"frost",
+					"poison",
+					"lightning"};
 
-				for (std::size_t i = 0; i < 8; ++i) {
+				for (std::size_t i = 0; i < std::size(matchupSuf); ++i) {
 					const std::string kh = std::string("matchup_heavy_") + matchupSuf[i];
 					const std::string kl = std::string("matchup_light_") + matchupSuf[i];
 					const std::string kc = std::string("matchup_clothing_") + matchupSuf[i];
@@ -87,9 +126,14 @@ namespace ERCF
 				s_values.enable_prisma_hud =
 					toml::find_or<bool>(tbl, "enable_prisma_hud", s_values.enable_prisma_hud);
 
-				ERCFLog::Line("ERCF: loaded ercf.toml successfully");
+				{
+					const std::string logLevelStr = toml::find_or<std::string>(tbl, "log_level", std::string("info"));
+					ERCFLog::SetLogLevel(ERCFLog::ParseLogLevel(logLevelStr));
+				}
+
+				LOG_INFO("ERCF: loaded ercf.toml successfully");
 			} catch (...) {
-				ERCFLog::Line("ERCF: exception while parsing ercf.toml, using defaults");
+				LOG_WARN("ERCF: exception while parsing ercf.toml, using defaults");
 			}
 		}
 
@@ -102,25 +146,40 @@ namespace ERCF
 
 			auto pluginDir = Config::GetPluginDirectory();
 			if (!pluginDir || pluginDir->empty()) {
-				ERCFLog::Line("Config: plugin directory not available; toml not read");
+				LOG_WARN("Config: plugin directory not available; toml not read");
 				return;
 			}
 			auto path = *pluginDir / "ercf.toml";
-			ERCFLog::LineF("Config: reading toml from '%s'", path.string().c_str());
+			LOG_INFO("Config: reading toml from '{}'", path.string());
 			if (std::filesystem::exists(path)) {
 				LoadFile(path);
 			} else {
-				ERCFLog::Line("ERCF: ercf.toml not found; using defaults");
+				LOG_INFO("ERCF: ercf.toml not found; using defaults");
 			}
 
-			ERCFLog::LineF(
-				"Config: effective status_meter_decay_enabled=%s",
-				s_values.status_meter_decay_enabled ? "true" : "false");
-			ERCFLog::LineF("Config: effective debug_hit_events=%s", s_values.debug_hit_events ? "true" : "false");
-			ERCFLog::LineF("Config: effective debug_status_decay=%s", s_values.debug_status_decay ? "true" : "false");
-			ERCFLog::LineF("Config: effective override_mode_strict=%s", s_values.override_mode_strict ? "true" : "false");
-			ERCFLog::LineF("Config: effective override_debug_log=%s", s_values.override_debug_log ? "true" : "false");
-			ERCFLog::LineF("Config: effective enable_prisma_hud=%s", s_values.enable_prisma_hud ? "true" : "false");
+			LOG_INFO("Config: effective status_meter_decay_enabled={}", s_values.status_meter_decay_enabled);
+			LOG_INFO("Config: effective debug_hit_events={}", s_values.debug_hit_events);
+			LOG_INFO(
+				"Config: effective log_level={}",
+				ERCFLog::LevelConfigString(ERCFLog::GetLogLevel()));
+			LOG_INFO("Config: effective debug_status_decay={}", s_values.debug_status_decay);
+			LOG_INFO("Config: effective override_mode_strict={}", s_values.override_mode_strict);
+			LOG_INFO("Config: effective override_debug_log={}", s_values.override_debug_log);
+			LOG_INFO("Config: effective enable_prisma_hud={}", s_values.enable_prisma_hud);
+			LOG_INFO(
+				"Config: effective spell_catalyst_base_min={} spell_catalyst_base_max={}",
+				s_values.spell_catalyst_base_min,
+				s_values.spell_catalyst_base_max);
+			LOG_INFO("Config: effective spell_innate_coef={}", s_values.spell_innate_coef);
+			LOG_INFO(
+				"Config: effective spell_hand_intrinsic_attr_coef={}",
+				s_values.spell_hand_intrinsic_attr_coef);
+			LOG_INFO("Config: effective spell_fallback_scale_coef={}", s_values.spell_fallback_scale_coef);
+			LOG_INFO(
+				"Config: effective spell_staff_tier_premium_min={} spell_staff_tier_premium_max={} spell_staff_enchant_k={}",
+				s_values.spell_staff_tier_premium_min,
+				s_values.spell_staff_tier_premium_max,
+				s_values.spell_staff_enchant_k);
 		}
 
 		std::optional<std::filesystem::path> GetPluginDirectory()

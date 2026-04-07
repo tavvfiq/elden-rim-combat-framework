@@ -17,6 +17,7 @@
 #include "RE/A/Actor.h"
 #include "RE/H/HitData.h"
 #include "RE/T/TESForm.h"
+#include "RE/T/TESObjectWEAP.h"
 
 namespace ERCF
 {
@@ -77,12 +78,12 @@ namespace ERCF
 		{
 			auto* scripts = RE::ScriptEventSourceHolder::GetSingleton();
 			if (!scripts) {
-				ERCFLog::Line("ERCF: ScriptEventSourceHolder missing; TESHitEvent sink not registered");
+				LOG_WARN("ERCF: ScriptEventSourceHolder missing; TESHitEvent sink not registered");
 				return;
 			}
 
 			scripts->AddEventSink(GetSingleton());
-			ERCFLog::Line("ERCF: TESHitEvent sink registered");
+			LOG_INFO("ERCF: TESHitEvent sink registered");
 		}
 
 		RE::BSEventNotifyControl HitEventHandler::ProcessEvent(const RE::TESHitEvent* a_event,
@@ -101,6 +102,10 @@ namespace ERCF
 			auto* target = a_event->target->As<RE::Actor>();
 
 			if (!attacker || !target) {
+				return RE::BSEventNotifyControl::kContinue;
+			}
+			// Some bash/shield events report player->player in TESHitEvent; never treat self-hit as status buildup.
+			if (attacker == target) {
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			if (target->IsDead()) {
@@ -147,6 +152,45 @@ namespace ERCF
 			const RE::TESObjectWEAP* weaponFormFallback = (hitData && hitData->weapon) ? hitData->weapon : nullptr;
 			RE::MagicItem* hitSpell = hitData ? hitData->attackDataSpell : nullptr;
 
+			// Spell / staff contact: TESHitEvent often fires when lastHitData is missing or omits weapon and
+			// attackDataSpell, so HitData-only resolution yields all-null and ERCF[ExtractHitSource] shows zeros.
+			// Guess equipped weapon only when we have no entry and no HitData weapon (avoids attributing a sword
+			// to an unarmed punch when HitData correctly leaves weapon null).
+			const RE::InventoryEntryData* weaponEntryMut = weaponEntry;
+			auto tryEquippedWeaponSlot = [&](bool a_leftHand) -> bool {
+				if (const auto* form = attacker->GetEquippedObject(a_leftHand)) {
+					if (const auto* weap = form->As<RE::TESObjectWEAP>()) {
+						weaponFormFallback = weap;
+						weaponEntryMut = attacker->GetEquippedEntryData(a_leftHand);
+						if (weaponEntryMut) {
+							magicTrace.weaponEntryKind = Esp::HitMagicTrace::WeaponEntry::EquippedSlotMatch;
+						}
+						return true;
+					}
+				}
+				return false;
+			};
+
+			if (!weaponFormFallback && !weaponEntryMut) {
+				if (!hitData || hitData->attackDataSpell != nullptr) {
+					if (!tryEquippedWeaponSlot(false)) {
+						tryEquippedWeaponSlot(true);
+					}
+				} else if (hitData && !hitData->weapon) {
+					for (const bool lh : { false, true }) {
+						if (const auto* form = attacker->GetEquippedObject(lh)) {
+							if (const auto* weap = form->As<RE::TESObjectWEAP>()) {
+								if (weap->IsStaff()) {
+									tryEquippedWeaponSlot(lh);
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+			weaponEntry = weaponEntryMut;
+
 			Esp::StatusBuildupCoefficients payload{};
 			Esp::ElementalHitComponents elemental{};
 			Esp::HitMagicTrace* tracePtr = cfg.debug_hit_events ? &magicTrace : nullptr;
@@ -191,105 +235,121 @@ namespace ERCF
 			std::array<float, Esp::kDamageTypeCount> takenMult{};
 			Esp::ExtractTakenDamageMultipliers(target, cfg, takenMult);
 
-			if (cfg.debug_hit_events) {
-				const float td = hitData ? hitData->totalDamage : -1.0f;
-				const float pd = hitData ? hitData->physicalDamage : -1.0f;
-				const bool hasWench = (weaponEntry && weaponEntry->GetEnchantment()) ||
-					(weaponFormFallback && weaponFormFallback->formEnchanting);
-				ERCFLog::LineF(
-					"ERCF [Hit] attacker=%08X target=%08X vanilla totalDmg=%.2f physDmg=%.2f wpnEnch=%d spell=%p "
-					"buildup poison=%.3f bleed=%.3f elem(Ma/Fi/Li/Ho)=%.2f,%.2f,%.2f,%.2f",
-					attacker->GetFormID(),
-					target->GetFormID(),
-					td,
-					pd,
-					hasWench ? 1 : 0,
-					static_cast<void*>(hitSpell),
-					payload.poisonPayload,
-					payload.bleedPayload,
-					elemental.attack[4],
-					elemental.attack[5],
-					elemental.attack[6],
-					elemental.attack[7]);
+			// if (!cfg.override_mode_strict && cfg.debug_hit_events) {
+			// 	const float td = hitData ? hitData->totalDamage : -1.0f;
+			// 	const float pd = hitData ? hitData->physicalDamage : -1.0f;
+			// 	const bool hasWench = (weaponEntry && weaponEntry->GetEnchantment()) ||
+			// 		(weaponFormFallback && weaponFormFallback->formEnchanting);
+			// 	LOG_INFO(
+			// 		"ERCF [Hit] attacker={:08X} target={:08X} vanilla totalDmg={:.2f} physDmg={:.2f} wpnEnch={} spell={} "
+			// 		"buildup poison={:.3f} bleed={:.3f} elem(Ma/Fi/Fr/Po/Li)={:.2f},{:.2f},{:.2f},{:.2f},{:.2f}",
+			// 		attacker->GetFormID(),
+			// 		target->GetFormID(),
+			// 		td,
+			// 		pd,
+			// 		hasWench ? 1 : 0,
+			// 		static_cast<const void*>(hitSpell),
+			// 		payload.poisonPayload,
+			// 		payload.bleedPayload,
+			// 		elemental.attack[static_cast<std::size_t>(Esp::DamageTypeId::Magic)],
+			// 		elemental.attack[static_cast<std::size_t>(Esp::DamageTypeId::Fire)],
+			// 		elemental.attack[static_cast<std::size_t>(Esp::DamageTypeId::Frost)],
+			// 		elemental.attack[static_cast<std::size_t>(Esp::DamageTypeId::Poison)],
+			// 		elemental.attack[static_cast<std::size_t>(Esp::DamageTypeId::Lightning)]);
 
-				const bool hitWeapNoInvEntry =
-					weaponFormFallback != nullptr &&
-					magicTrace.weaponEntryKind == Esp::HitMagicTrace::WeaponEntry::None;
-				const bool inconsistentNoMagicSource =
-					(payload.poisonPayload > 0.0f || payload.bleedPayload > 0.0f || anyElemental) &&
-					magicTrace.weaponEnchantKind == Esp::HitMagicTrace::WeaponEnchant::None &&
-					!magicTrace.accumulatedSeparateHitSpell;
-				const bool usedFallbackEITM =
-					magicTrace.weaponEnchantKind == Esp::HitMagicTrace::WeaponEnchant::HitDataWeaponFormEITM;
-				ERCFLog::LineF(
-					"ERCF [Hit] magicTrace wEntry=%s wEnchant=%s hitSpellExtra=%s vanillaDamagingHit=%s "
-					"flags=%s%s%ssummary=%s",
-					DescribeWeaponEntryTrace(magicTrace.weaponEntryKind),
-					DescribeWeaponEnchantTrace(magicTrace.weaponEnchantKind),
-					magicTrace.accumulatedSeparateHitSpell ? "yes" : "no",
-					vanillaDamagingHit ? "yes" : "no",
-					hitWeapNoInvEntry ? "hitWeapNoInvEntry " : "",
-					usedFallbackEITM ? "usedFallbackEITM " : "",
-					inconsistentNoMagicSource ? "INCONSISTENT_noEnchantSource " : "",
-					(hitWeapNoInvEntry || usedFallbackEITM || inconsistentNoMagicSource) ? "issues" : "ok");
-				ERCFLog::LineF(
-					"ERCF [Hit] target resist immunity=%.3f robustness=%.3f "
-					"def(std/str/sla/pie)=%.2f,%.2f,%.2f,%.2f def(mag/fir/lig/hol)=%.2f,%.2f,%.2f,%.2f",
-					resist.immunityResValue,
-					resist.robustnessResValue,
-					mitigation.defense[0],
-					mitigation.defense[1],
-					mitigation.defense[2],
-					mitigation.defense[3],
-					mitigation.defense[4],
-					mitigation.defense[5],
-					mitigation.defense[6],
-					mitigation.defense[7]);
-				ERCFLog::LineF(
-					"ERCF [Hit] takenMult(std/str/sla/pie)=%.3f,%.3f,%.3f,%.3f takenMult(ma/fi/li/ho)=%.3f,%.3f,%.3f,%.3f",
-					takenMult[0],
-					takenMult[1],
-					takenMult[2],
-					takenMult[3],
-					takenMult[4],
-					takenMult[5],
-					takenMult[6],
-					takenMult[7]);
-			}
+			// 	const bool hitWeapNoInvEntry =
+			// 		weaponFormFallback != nullptr &&
+			// 		magicTrace.weaponEntryKind == Esp::HitMagicTrace::WeaponEntry::None;
+			// 	const bool inconsistentNoMagicSource =
+			// 		(payload.poisonPayload > 0.0f || payload.bleedPayload > 0.0f || anyElemental) &&
+			// 		magicTrace.weaponEnchantKind == Esp::HitMagicTrace::WeaponEnchant::None &&
+			// 		!magicTrace.accumulatedSeparateHitSpell;
+			// 	const bool usedFallbackEITM =
+			// 		magicTrace.weaponEnchantKind == Esp::HitMagicTrace::WeaponEnchant::HitDataWeaponFormEITM;
+			// 	LOG_INFO(
+			// 		"ERCF [Hit] magicTrace wEntry={} wEnchant={} hitSpellExtra={} vanillaDamagingHit={} "
+			// 		"flags={}{}{}summary={}",
+			// 		DescribeWeaponEntryTrace(magicTrace.weaponEntryKind),
+			// 		DescribeWeaponEnchantTrace(magicTrace.weaponEnchantKind),
+			// 		magicTrace.accumulatedSeparateHitSpell ? "yes" : "no",
+			// 		vanillaDamagingHit ? "yes" : "no",
+			// 		hitWeapNoInvEntry ? "hitWeapNoInvEntry " : "",
+			// 		usedFallbackEITM ? "usedFallbackEITM " : "",
+			// 		inconsistentNoMagicSource ? "INCONSISTENT_noEnchantSource " : "",
+			// 		(hitWeapNoInvEntry || usedFallbackEITM || inconsistentNoMagicSource) ? "issues" : "ok");
+			// 	LOG_INFO(
+			// 		"ERCF [Hit] target resist immunity={:.3f} robustness={:.3f} "
+			// 		"def(std/str/sla/pie)={:.2f},{:.2f},{:.2f},{:.2f} def(ma/fi/fr/po/li)={:.2f},{:.2f},{:.2f},{:.2f},{:.2f}",
+			// 		resist.immunityResValue,
+			// 		resist.robustnessResValue,
+			// 		mitigation.defense[0],
+			// 		mitigation.defense[1],
+			// 		mitigation.defense[2],
+			// 		mitigation.defense[3],
+			// 		mitigation.defense[4],
+			// 		mitigation.defense[5],
+			// 		mitigation.defense[6],
+			// 		mitigation.defense[7],
+			// 		mitigation.defense[8]);
+			// 	LOG_INFO(
+			// 		"ERCF [Hit] takenMult(std/str/sla/pie)={:.3f},{:.3f},{:.3f},{:.3f} "
+			// 		"takenMult(ma/fi/fr/po/li)={:.3f},{:.3f},{:.3f},{:.3f},{:.3f}",
+			// 		takenMult[0],
+			// 		takenMult[1],
+			// 		takenMult[2],
+			// 		takenMult[3],
+			// 		takenMult[4],
+			// 		takenMult[5],
+			// 		takenMult[6],
+			// 		takenMult[7],
+			// 		takenMult[8]);
+			// }
 
 			// In strict override mode, on-hit HP is owned by OverrideDamageHook.
 			// TESHitEvent path remains for status buildup/procs only.
-			if (!cfg.override_mode_strict && vanillaDamagingHit && anyElemental) {
-				for (std::size_t i = static_cast<std::size_t>(Esp::DamageTypeId::Magic); i < Esp::kDamageTypeCount; ++i) {
-					const float atk = elemental.attack[i] * cfg.elemental_enchant_damage_scale;
-					if (atk <= 0.0f) {
-						continue;
-					}
-					const float postMit = Math::DamageAfterDefenseAndAbsorption(
-						atk,
-						mitigation.defense[i],
-						mitigation.absorptionFractions[i],
-						cfg);
-					const float dmg = Math::ApplyTakenDamageMultiplier(postMit, takenMult[i]);
-					if (cfg.debug_hit_events) {
-						ERCFLog::LineF(
-							"ERCF [Hit] elem typeIdx=%u atk=%.3f postMitig=%.3f absCount=%u takenMult=%.3f applyHP=%.3f",
-							static_cast<unsigned>(i),
-							atk,
-							postMit,
-							static_cast<unsigned>(mitigation.absorptionFractions[i].size()),
-							takenMult[i],
-							dmg);
-					}
-					// Only finite, strictly positive damage; negative/zero avoids accidentally healing
-					// (DamageActorValue uses positive as damage and keeps HUD/death state in sync).
-					if (std::isfinite(dmg) && dmg > 0.0f) {
-						if (auto* avOwner = target->AsActorValueOwner()) {
-							avOwner->ModActorValue(RE::ActorValue::kHealth, -dmg);
-						}
-					}
-				}
-			}
+			// const RE::MagicItem* weaponEnchantForSun = nullptr;
+			// if (weaponEntry && weaponEntry->GetEnchantment()) {
+			// 	weaponEnchantForSun = weaponEntry->GetEnchantment();
+			// } else if (weaponFormFallback && weaponFormFallback->formEnchanting) {
+			// 	weaponEnchantForSun = weaponFormFallback->formEnchanting;
+			// }
+			// const bool sunHitSources = Esp::HitSourcesHaveSunDamageKeyword(hitSpell, weaponEnchantForSun);
+			// const float sunMagicScalar = Esp::Layer2SunMagicScalar(target, sunHitSources);
+
+			// if (!cfg.override_mode_strict && vanillaDamagingHit && anyElemental) {
+			// 	for (std::size_t i = static_cast<std::size_t>(Esp::DamageTypeId::Magic); i < Esp::kDamageTypeCount; ++i) {
+			// 		const float atk = elemental.attack[i] * cfg.elemental_enchant_damage_scale;
+			// 		if (atk <= 0.0f) {
+			// 			continue;
+			// 		}
+			// 		const float postMit = Math::DamageAfterDefenseAndAbsorption(
+			// 			atk,
+			// 			mitigation.defense[i],
+			// 			mitigation.absorptionFractions[i],
+			// 			cfg);
+			// 		float dmg = Math::ApplyTakenDamageMultiplier(postMit, takenMult[i]);
+			// 		if (i == static_cast<std::size_t>(Esp::DamageTypeId::Magic)) {
+			// 			dmg *= sunMagicScalar;
+			// 		}
+			// 		if (cfg.debug_hit_events) {
+			// 			LOG_INFO(
+			// 				"ERCF [Hit] elem typeIdx={} atk={:.3f} postMitig={:.3f} absCount={} takenMult={:.3f} applyHP={:.3f}",
+			// 				static_cast<unsigned>(i),
+			// 				atk,
+			// 				postMit,
+			// 				static_cast<unsigned>(mitigation.absorptionFractions[i].size()),
+			// 				takenMult[i],
+			// 				dmg);
+			// 		}
+			// 		// Only finite, strictly positive damage; negative/zero avoids accidentally healing
+			// 		// (DamageActorValue uses positive as damage and keeps HUD/death state in sync).
+			// 		if (std::isfinite(dmg) && dmg > 0.0f) {
+			// 			if (auto* avOwner = target->AsActorValueOwner()) {
+			// 				avOwner->ModActorValue(RE::ActorValue::kHealth, -dmg);
+			// 			}
+			// 		}
+			// 	}
+			// }
 
 			const bool playerTarget = target->IsPlayerRef();
 			const bool isBoss = target->HasKeywordString("ActorTypeBoss");
@@ -419,14 +479,35 @@ namespace ERCF
 			if (npcMetersLog) {
 				StatusEffects::PlayerMetersHudSnapshot m{};
 				(void)StatusEffects::TryGetMeterSnapshotForHud(tgtF, m);
-				ERCFLog::LineF(
-					"ERCF [Hit] NPC target meters poison=%.2f bleed=%.2f rot=%.2f frost=%.2f sleep=%.2f (target=%08X)",
+				LOG_INFO(
+					"ERCF [Hit] NPC target meters poison={:.2f} bleed={:.2f} rot={:.2f} frost={:.2f} sleep={:.2f} (target={:08X})",
 					m.poison,
 					m.bleed,
 					m.rot,
 					m.frostbite,
 					m.sleep,
 					tgtF);
+			}
+
+			// When the player is the target, we still want to know *why* a meter moved (weapon enchant vs hit spell).
+			// The existing "NPC target meters" line is suppressed for player targets to avoid log spam.
+			const bool playerSourceLog = cfg.debug_hit_events && playerTarget && willApplyStatus;
+			if (playerSourceLog) {
+				LOG_INFO(
+					"ERCF [Hit] Player target source attacker={:08X} target={:08X} "
+					"payload(poison/bleed/rot/frost/sleep/mad)={:.3f}/{:.3f}/{:.3f}/{:.3f}/{:.3f}/{:.3f} "
+					"magicTrace wEntry={} wEnchant={} hitSpellExtra={}",
+					atkF,
+					tgtF,
+					payload.poisonPayload,
+					payload.bleedPayload,
+					payload.rotPayload,
+					frostPayload,
+					payload.sleepPayload,
+					payload.madnessPayload,
+					DescribeWeaponEntryTrace(magicTrace.weaponEntryKind),
+					DescribeWeaponEnchantTrace(magicTrace.weaponEnchantKind),
+					magicTrace.accumulatedSeparateHitSpell ? "yes" : "no");
 			}
 
 			if (anyProc) {

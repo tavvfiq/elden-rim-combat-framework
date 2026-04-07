@@ -676,10 +676,10 @@ namespace ERCF
 				}
 				g_view = g_api->CreateView(VIEW_PATH, on_dom_ready);
 				if (!g_view) {
-					ERCFLog::Line("ERCF: PrismaUI CreateView failed (kDataLoaded)");
+					LOG_ERROR("ERCF: PrismaUI CreateView failed (kDataLoaded)");
 					return;
 				}
-				ERCFLog::Line("ERCF: PrismaUI view created on kDataLoaded (Souls-style)");
+				LOG_INFO("ERCF: PrismaUI view created on kDataLoaded (Souls-style)");
 			}
 
 		}
@@ -692,13 +692,13 @@ namespace ERCF
 
 			const auto& cfg = ERCF::Config::Get();
 			if (!cfg.enable_prisma_hud) {
-				ERCFLog::Line("ERCF: Prisma HUD disabled (enable_prisma_hud = false in ercf.toml)");
+				LOG_INFO("ERCF: Prisma HUD disabled (enable_prisma_hud = false in ercf.toml)");
 				return;
 			}
 
 			g_api = reinterpret_cast<PRISMA_UI_API::IVPrismaUI1*>(PRISMA_UI_API::RequestPluginAPI(PRISMA_UI_API::InterfaceVersion::V1));
 			if (!g_api) {
-				ERCFLog::Line("ERCF: PrismaUI_API not found (PrismaUI.dll missing?)");
+				LOG_WARN("ERCF: PrismaUI_API not found (PrismaUI.dll missing?)");
 				return;
 			}
 
@@ -706,7 +706,7 @@ namespace ERCF
 
 			// Souls Style Looting pattern: CreateView from kDataLoaded after RequestPluginAPI.
 			create_view_immediate();
-			ERCFLog::Line("ERCF: PrismaUI API acquired (CreateView on kDataLoaded)");
+			LOG_INFO("ERCF: PrismaUI API acquired (CreateView on kDataLoaded)");
 		}
 
 		void OnPlayerBuildupHudEvent(

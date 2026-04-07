@@ -13,6 +13,8 @@ set_license("GPL-3.0")
 set_languages("c++23")
 set_warnings("allextra")
 
+-- clangd / LSP: `xmake project -k compile_commands` → compile_commands.json in repo root (see .clangd)
+
 -- config deps
 add_requires("toml11")
 

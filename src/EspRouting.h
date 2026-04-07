@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "CombatMath.h"
 #include "Config.h"
 
 #include <RE/A/Actor.h>
@@ -17,6 +18,7 @@ namespace ERCF
 {
 	namespace Esp
 	{
+		// Elemental IDs match requirement.md §1 (Fire / Frost / Poison / Lightning / Magic).
 		enum class DamageTypeId : std::uint32_t
 		{
 			Standard = 0,
@@ -25,8 +27,9 @@ namespace ERCF
 			Pierce = 3,
 			Magic = 4,
 			Fire = 5,
-			Lightning = 6,
-			Holy = 7,
+			Frost = 6,
+			Poison = 7,
+			Lightning = 8,
 			kTotal
 		};
 
@@ -91,10 +94,18 @@ namespace ERCF
 
 		// Reads ERCF-tagged effects from the weapon's instance enchantment and/or the hit spell.
 		// Buildup: MGEF keywords ERCF.MGEF.Buildup + ERCF.Status.* (magnitude does not deal HP by itself here).
-		// Elemental: MGEF keywords ERCF.MGEF.ElementalDamage + ERCF.DamageType.Elem.* (magnitude is processed as attack in HitEventHandler).
+			// Elemental: MGEF keywords ERCF.MGEF.ElementalDamage + ERCF.DamageType.Elem.*
+			// (Magic / Fire / Frost / Poison / Lightning; legacy ERCF.DamageType.Elem.Holy → Magic bucket).
+		// a_emitExtractDebugLog: when false, skips ERCF[ExtractHitSource] LOG_DEBUG even if debug_hit_events is on
+		// (use for cheap probes that pass nullptr weapon entry by design, e.g. projectile branch in OverrideDamageHook).
 		void ExtractHitSourceFromWeaponAndSpell(const RE::InventoryEntryData* a_weaponEntry, const RE::MagicItem* a_hitSpell,
 			StatusBuildupCoefficients& a_buildupOut, ElementalHitComponents& a_elementalOut,
 			const RE::TESObjectWEAP* a_weaponFormFallback = nullptr, HitMagicTrace* a_trace = nullptr);
+
+		// Sums weapon enchant MGEF magnitudes (CK: **percent** of base per line) tagged
+		// ERCF.WeaponAttributeScaling.{STR,DEX,INT,FTH,ARC}; stored internally as decimal multipliers (÷100).
+		// (see weapon_attribute_scaling.md). Does not read hit spells.
+		void AccumulateWeaponAttributeScalingFromMagicItem(const RE::MagicItem* a_item, Math::WeaponAttrScalingCoeffs& a_out);
 
 		// Weapon physical profile: ERCF.DamageType.Phys.* keywords on the weapon if present, else WEAPON_TYPE fallback.
 		void ResolvePhysicalWeaponWeights(const RE::TESObjectWEAP* a_weapon, PhysicalWeaponWeights& a_weightsOut);
@@ -133,6 +144,16 @@ namespace ERCF
 		// - If no worn armor rating, uses the clothing row (unarmored / flesh baseline).
 		// - Then multiplies by each active MGEF tagged ERCF.MGEF.TakenMult + ERCF.DamageType.* (magnitude = multiplier).
 		void ExtractTakenDamageMultipliers(RE::Actor* a_target, const Config::Values& a_cfg, std::array<float, kDamageTypeCount>& a_out);
+
+		// requirement.md §2.2: Dawnguard sun keywords on hit spell / weapon enchant → Magic-type component *0 vs non-undead.
+		[[nodiscard]] bool HitSourcesHaveSunDamageKeyword(
+			const RE::MagicItem* hitSpell,
+			const RE::MagicItem* weaponEnchant);
+
+		[[nodiscard]] float Layer2SunMagicScalar(const RE::Actor* victim, bool sourcesHaveSunKeyword);
+
+		// requirement.md §2.2: silver material vs undead — multiplicative bonus on physical D_l2 (tunable constant in .cpp).
+		[[nodiscard]] float Layer2SilverVsUndeadPhysicalScalar(const RE::Actor* victim, const RE::TESObjectWEAP* weapon);
 
 		// Convenience: resolve weapon form for a hit (HitData weapon, else attacking inventory entry).
 		[[nodiscard]] const RE::TESObjectWEAP* ResolveWeaponFormForHit(

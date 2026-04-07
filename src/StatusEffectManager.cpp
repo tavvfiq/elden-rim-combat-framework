@@ -247,7 +247,7 @@ namespace ERCF
 			void ApplyStatusProcMessageImpl(const StatusProcMessage& a_msg)
 			{
 				if (a_msg.targetFormId == 0) {
-					ERCFLog::Line("ERCF: ApplyStatusProc failed: targetFormId=0");
+					LOG_WARN("ERCF: ApplyStatusProc failed: targetFormId=0");
 					return;
 				}
 				if (a_msg.payloadAtPop <= 0.0f) {
@@ -256,7 +256,7 @@ namespace ERCF
 
 				auto* target = RE::TESForm::LookupByID<RE::Actor>(a_msg.targetFormId);
 				if (!target) {
-					ERCFLog::LineF("ERCF: ApplyStatusProc: target Actor not found (formId=%u)", a_msg.targetFormId);
+					LOG_WARN("ERCF: ApplyStatusProc: target Actor not found (formId={})", a_msg.targetFormId);
 					{
 						std::lock_guard<std::mutex> lock{ g_mutex };
 						g_poisonProcApplyPending.erase(a_msg.targetFormId);
@@ -859,8 +859,8 @@ namespace ERCF
 								decayWindowSec = hi - lo;
 							}
 						}
-						ERCFLog::LineF(
-							"ERCF [StatusDecay] target=%08X %s before=%.4f after=%.4f decayWindowSec=%.4f",
+						LOG_INFO(
+							"ERCF [StatusDecay] target={:08X} {} before={:.4f} after={:.4f} decayWindowSec={:.4f}",
 							a_formId,
 							DecaySlotName(slot),
 							meterBefore,
@@ -982,8 +982,8 @@ namespace ERCF
 					if (debugHits) {
 						for (std::uint32_t i = 0; i < batch.count; ++i) {
 							const auto& e = batch.entries[i];
-							ERCFLog::LineF(
-								"ERCF [Hit] StatusProc emit status=%u attacker=%08X target=%08X meterBeforeHit=%.3f payload=%.3f",
+							LOG_INFO(
+								"ERCF [Hit] StatusProc emit status={} attacker={:08X} target={:08X} meterBeforeHit={:.3f} payload={:.3f}",
 								e.statusId,
 								e.attackerFormId,
 								e.targetFormId,
@@ -1020,8 +1020,8 @@ namespace ERCF
 						hud.madness = st.madnessMeter;
 					}
 				}
-				ERCFLog::LineF(
-					"ERCF: Player meters poison=%.2f bleed=%.2f rot=%.2f frost=%.2f sleep=%.2f madness=%.2f",
+				LOG_INFO(
+					"ERCF: Player meters poison={:.2f} bleed={:.2f} rot={:.2f} frost={:.2f} sleep={:.2f} madness={:.2f}",
 					hud.poison,
 					hud.bleed,
 					hud.rot,
@@ -1149,7 +1149,7 @@ namespace ERCF
 
 				if (runDecay) {
 					if (!g_loggedDecayHook.exchange(true, std::memory_order_acq_rel) && cfg.debug_status_decay) {
-						ERCFLog::Line(
+						LOG_INFO(
 							"ERCF [StatusDecay] Actor::Update decay active (verbose decay logging enabled in ercf.toml)");
 					}
 
@@ -1178,7 +1178,7 @@ namespace ERCF
 				} else {
 					static std::atomic<bool> s_loggedMissingOrig{ false };
 					if (!s_loggedMissingOrig.exchange(true, std::memory_order_acq_rel)) {
-						ERCFLog::Line("ERCF: StatusEffects Actor::Update hook could not resolve original");
+						LOG_ERROR("ERCF: StatusEffects Actor::Update hook could not resolve original");
 					}
 				}
 				OnActorPostUpdate(a_this);
@@ -1219,8 +1219,8 @@ namespace ERCF
 					return;
 				}
 				PatchActorUpdateVtables();
-				ERCFLog::LineF(
-					"ERCF: StatusEffects Actor::Update decay hook installed (vtbl origins=%zu)",
+				LOG_INFO(
+					"ERCF: StatusEffects Actor::Update decay hook installed (vtbl origins={})",
 					g_actorUpdateVtableOrig.size());
 			}
 		}

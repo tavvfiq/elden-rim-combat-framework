@@ -9,7 +9,7 @@ namespace ERCF
 	void EmitStatusProcBatch(const StatusProcBatchMessage& a_batch)
 	{
 		if (a_batch.count == 0 || a_batch.count > kStatusProcBatchMaxEntries) {
-			ERCFLog::Line("ERCF: EmitStatusProcBatch invalid count");
+			LOG_WARN("ERCF: EmitStatusProcBatch invalid count");
 			return;
 		}
 		if (auto* messaging = SKSE::GetMessagingInterface()) {
@@ -21,7 +21,7 @@ namespace ERCF
 				static_cast<std::uint32_t>(sizeof(StatusProcBatchMessage)),
 				nullptr);
 			if (!ok) {
-				ERCFLog::Line("ERCF: EmitStatusProcBatch dispatch failed");
+				LOG_WARN("ERCF: EmitStatusProcBatch dispatch failed");
 			}
 		}
 	}
@@ -43,7 +43,7 @@ namespace ERCF
 				0,
 				nullptr);
 			if (!ok) {
-				ERCFLog::Line("ERCF: EmitPrismaHudBuildupRefresh dispatch failed");
+				LOG_WARN("ERCF: EmitPrismaHudBuildupRefresh dispatch failed");
 			}
 		}
 	}

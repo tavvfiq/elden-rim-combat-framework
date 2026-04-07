@@ -9,8 +9,8 @@ namespace ERCF
 {
 	namespace Config
 	{
-		// Order: Standard, Strike, Slash, Pierce, Magic, Fire, Lightning, Holy (matches Esp::DamageTypeId).
-		using MatchupTakenRow = std::array<float, 8>;
+		// Order: Standard, Strike, Slash, Pierce, Magic, Fire, Frost, Poison, Lightning (matches Esp::DamageTypeId).
+		using MatchupTakenRow = std::array<float, 9>;
 
 		struct Values
 		{
@@ -49,6 +49,21 @@ namespace ERCF
 			// Weapon/spell ERCF.MGEF.ElementalDamage magnitudes are multiplied by this before the Defense→Absorption pipeline.
 			float elemental_enchant_damage_scale = 1.0f;
 
+			// Strict override: spell/staff missile path (spell_staff_damage.md). ResolveStaffSpellCatalystBase maps
+			// staff/spell tier to a score in [spell_catalyst_base_min, spell_catalyst_base_max] → tier01 for premium lerp.
+			float spell_catalyst_base_min = 1.0f;
+			float spell_catalyst_base_max = 6.0f;
+			// Hands: FinalMag *= 1 + spell_innate_coef * StatSat (INT). Raise this if hand spells feel weak after L1/L2.
+			float spell_innate_coef = 3.0f;
+			// Elemental missile damage: when HitData has no weapon enchant, ERAS attribute scaling bonus is 0.
+			// Add this as a synthetic scaling coeff on the higher of INT vs FTH (same units as weapon § scaling decimals).
+			float spell_hand_intrinsic_attr_coef = 1.35f;
+			float spell_fallback_scale_coef = 0.9f;
+			// Staff: FinalMag *= handMult * lerp(premium_min, premium_max, tier01) * (1 + enchant_k * ScaleCoef * StatSat).
+			float spell_staff_tier_premium_min = 1.05f;
+			float spell_staff_tier_premium_max = 1.15f;
+			float spell_staff_enchant_k = 0.25f;
+
 			// After Defense→Absorption, final damage is multiplied by a per-type "taken" factor.
 			// Worn pieces contribute their GetArmorRating() into heavy / light / clothing buckets (BOD2 armor type);
 			// the target's multiplier per type T is a rating-weighted blend of the three rows.
@@ -61,8 +76,9 @@ namespace ERCF
 				0.92f, // Pierce
 				1.12f, // Magic   — slightly better vs heavily armored
 				1.0f,  // Fire
-				1.05f, // Lightning
-				1.0f   // Holy
+				1.0f,  // Frost
+				1.0f,  // Poison
+				1.05f  // Lightning
 			};
 			MatchupTakenRow matchup_taken_light{
 				1.0f,
@@ -70,6 +86,7 @@ namespace ERCF
 				1.1f,
 				1.12f,
 				0.94f,
+				1.0f,
 				1.0f,
 				1.0f,
 				1.0f};
@@ -80,8 +97,9 @@ namespace ERCF
 				1.1f,
 				1.0f,
 				1.08f,
-				1.05f,
-				1.0f};
+				1.0f,
+				1.0f,
+				1.05f};
 
 			// Hard clamp after blending with ERCF.MGEF.TakenMult active effects.
 			float matchup_taken_mult_min = 0.05f;

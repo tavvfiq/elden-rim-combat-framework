@@ -1,115 +1,113 @@
 #include "pch.h"
+
 #include "Log.h"
 
-#include <chrono>
-#include <cstdarg>
-#include <cstdio>
-#include <fstream>
-#include <mutex>
-#include <filesystem>
-#include <vector>
+#include <cctype>
+#include <algorithm>
+
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
 
 namespace ERCFLog
 {
-	namespace
-	{
-		std::mutex s_lock;
-		std::filesystem::path s_logPath;
-
-		void WriteLine(const char* msg)
-		{
-			std::lock_guard<std::mutex> lock{s_lock};
-			if (s_logPath.empty()) {
-				if (auto logDir = SKSE::log::log_directory()) {
-					s_logPath = *logDir / "ERCF.log";
-				}
-			}
-			if (s_logPath.empty()) {
-				return;
-			}
-
-			std::ofstream f{s_logPath, std::ios::app};
-			if (!f) {
-				return;
-			}
-
-			auto now = std::chrono::system_clock::now();
-			std::time_t t = std::chrono::system_clock::to_time_t(now);
-#ifdef _WIN32
-			std::tm tm{};
-			localtime_s(&tm, &t);
-#else
-			std::tm tm{};
-			localtime_r(&t, &tm);
-#endif
-			char buf[32]{};
-			std::strftime(buf, sizeof(buf), "%H:%M:%S", &tm);
-			f << buf << " " << msg << "\n";
-		}
-	}
-
 	void Init()
 	{
-		if (auto logDir = SKSE::log::log_directory()) {
-			s_logPath = *logDir / "ERCF.log";
-			// Fresh log each Skyrim launch (plugin load).
-			{
-				std::ofstream f{s_logPath, std::ios::trunc};
-			}
+		auto logsFolder = SKSE::log::log_directory();
+		if (!logsFolder) {
+			SKSE::stl::report_and_fail("Unable to resolve SKSE logs directory.");
 		}
-		Line("ERCF: log init");
+
+		*logsFolder /= "ERCF.log";
+
+		auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logsFolder->string(), true);
+		auto defaultLogger = std::make_shared<spdlog::logger>("global log", std::move(sink));
+
+		spdlog::set_default_logger(std::move(defaultLogger));
+		spdlog::set_level(spdlog::level::info);
+		spdlog::flush_on(spdlog::level::info);
+		spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
 	}
 
 	void EnsureLogPath()
 	{
-		std::lock_guard<std::mutex> lock{s_lock};
-		if (!s_logPath.empty()) {
-			return;
-		}
-		if (auto logDir = SKSE::log::log_directory()) {
-			s_logPath = *logDir / "ERCF.log";
-		}
 	}
 
 	void TruncateForGameplaySession()
 	{
-		std::lock_guard<std::mutex> lock{s_lock};
-		if (s_logPath.empty()) {
-			if (auto logDir = SKSE::log::log_directory()) {
-				s_logPath = *logDir / "ERCF.log";
-			}
-		}
-		if (s_logPath.empty()) {
-			return;
-		}
-		std::ofstream f{s_logPath, std::ios::trunc};
 	}
 
-	void Line(const char* msg)
+	void SetLogLevel(spdlog::level::level_enum a_level) noexcept
 	{
-		WriteLine(msg);
+		if (const auto& lg = spdlog::default_logger()) {
+			lg->set_level(a_level);
+		}
 	}
 
-	void LineF(const char* fmt, ...)
+	spdlog::level::level_enum GetLogLevel() noexcept
 	{
-		std::va_list args;
-		va_start(args, fmt);
-		std::vector<char> buf(512);
-		int n = std::vsnprintf(buf.data(), buf.size(), fmt, args);
-		va_end(args);
-
-		if (n < 0) {
-			return;
+		if (const auto& lg = spdlog::default_logger()) {
+			return lg->level();
 		}
+		return spdlog::level::info;
+	}
 
-		if (static_cast<size_t>(n) >= buf.size()) {
-			buf.resize(static_cast<size_t>(n) + 1);
-			va_start(args, fmt);
-			std::vsnprintf(buf.data(), buf.size(), fmt, args);
-			va_end(args);
+	const char* LevelConfigString(spdlog::level::level_enum a_level) noexcept
+	{
+		switch (a_level) {
+		case spdlog::level::trace:
+			return "trace";
+		case spdlog::level::debug:
+			return "debug";
+		case spdlog::level::info:
+			return "info";
+		case spdlog::level::warn:
+			return "warn";
+		case spdlog::level::err:
+			return "error";
+		case spdlog::level::critical:
+			return "critical";
+		case spdlog::level::off:
+			return "off";
+		default:
+			return "info";
 		}
+	}
 
-		WriteLine(buf.data());
+	spdlog::level::level_enum ParseLogLevel(std::string_view a_sv) noexcept
+	{
+		while (!a_sv.empty() && std::isspace(static_cast<unsigned char>(a_sv.front()))) {
+			a_sv.remove_prefix(1);
+		}
+		while (!a_sv.empty() && std::isspace(static_cast<unsigned char>(a_sv.back()))) {
+			a_sv.remove_suffix(1);
+		}
+		char low[16]{};
+		const auto n = (std::min)(a_sv.size(), sizeof(low) - 1);
+		for (std::size_t i = 0; i < n; ++i) {
+			low[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(a_sv[i])));
+		}
+		const std::string_view s(low, n);
+		if (s == "off") {
+			return spdlog::level::off;
+		}
+		if (s == "critical") {
+			return spdlog::level::critical;
+		}
+		if (s == "error" || s == "err") {
+			return spdlog::level::err;
+		}
+		if (s == "warn" || s == "warning") {
+			return spdlog::level::warn;
+		}
+		if (s == "info") {
+			return spdlog::level::info;
+		}
+		if (s == "debug") {
+			return spdlog::level::debug;
+		}
+		if (s == "trace") {
+			return spdlog::level::trace;
+		}
+		return spdlog::level::info;
 	}
 }
-

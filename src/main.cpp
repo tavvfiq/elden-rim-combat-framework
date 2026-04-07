@@ -24,20 +24,20 @@ namespace
 			return;
 		}
 		if (a_msg->dataLen < sizeof(ERCF::StatusProcBatchMessage) || !a_msg->data) {
-			ERCFLog::Line("ERCF: StatusProc batch invalid payload (size/data)");
+			LOG_WARN("ERCF: StatusProc batch invalid payload (size/data)");
 			return;
 		}
 
 		auto* batch = static_cast<ERCF::StatusProcBatchMessage*>(a_msg->data);
 		if (batch->count == 0 || batch->count > ERCF::kStatusProcBatchMaxEntries) {
-			ERCFLog::Line("ERCF: StatusProc batch invalid count");
+			LOG_WARN("ERCF: StatusProc batch invalid count");
 			return;
 		}
 
 		for (std::uint32_t i = 0; i < batch->count; ++i) {
 			const auto& payload = batch->entries[i];
-			ERCFLog::LineF(
-				"ERCF: StatusProc received [%u/%u] (attacker=%u target=%u status=%u band=%u meter=%.3f payload=%.3f)",
+			LOG_INFO(
+				"ERCF: StatusProc received [{}/{}] (attacker={} target={} status={} band={} meter={:.3f} payload={:.3f})",
 				i + 1,
 				batch->count,
 				payload.attackerFormId,
@@ -59,7 +59,7 @@ namespace
 		switch (a_msg->type) {
 		case SKSE::MessagingInterface::kDataLoaded:
 			ERCFLog::EnsureLogPath();
-			ERCFLog::Line("ERCF: kDataLoaded");
+			LOG_INFO("ERCF: kDataLoaded");
 			ERCF::Config::Load();
 			ERCF::ERAS::Init();
 			ERCF::Override::Install();
@@ -69,11 +69,11 @@ namespace
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 			ERCFLog::TruncateForGameplaySession();
-			ERCFLog::Line("ERCF: kPostLoadGame");
+			LOG_INFO("ERCF: kPostLoadGame");
 			break;
 		case SKSE::MessagingInterface::kNewGame:
 			ERCFLog::TruncateForGameplaySession();
-			ERCFLog::Line("ERCF: kNewGame");
+			LOG_INFO("ERCF: kNewGame");
 			// Safety: avoid auto-starting Prisma on New Game path (observed freeze-prone).
 			// HUD can still be started later through safer runtime paths.
 			break;
@@ -87,23 +87,23 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
 	ERCFLog::Init();
-	ERCFLog::Line("ERCF: plugin loaded");
+	LOG_INFO("ERCF: plugin loaded");
 
 	const auto messaging = SKSE::GetMessagingInterface();
 	if (!messaging) {
-		ERCFLog::Line("ERCF: missing SKSE messaging interface");
+		LOG_ERROR("ERCF: missing SKSE messaging interface");
 		return false;
 	}
 
 	// Receive ERCF public proc messages emitted by this plugin (and potentially others).
 	if (!messaging->RegisterListener(ERCF::kSenderName, OnStatusProcMessage)) {
-		ERCFLog::Line("ERCF: failed to register StatusProc listener");
+		LOG_ERROR("ERCF: failed to register StatusProc listener");
 	}
 
 	// Receive SKSE lifecycle messages (kDataLoaded/kPostLoadGame/kNewGame).
 	// Use no-sender overload for broad compatibility across SKSE setups.
 	if (!messaging->RegisterListener(OnSkseLifecycleMessage)) {
-		ERCFLog::Line("ERCF: failed to register SKSE lifecycle listener");
+		LOG_ERROR("ERCF: failed to register SKSE lifecycle listener");
 	}
 
 	return true;
